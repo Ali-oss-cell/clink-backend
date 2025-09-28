@@ -1,0 +1,674 @@
+{
+  "info": {
+    "name": "Psychology Clinic API - Complete Collection",
+    "description": "Complete API collection for Australian Psychology Clinic Backend with environment variables and test cases",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "api_url",
+      "value": "{{base_url}}/api",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "🚀 Quick Start Tests",
+      "item": [
+        {
+          "name": "1. Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/health/",
+              "host": ["{{api_url}}"],
+              "path": ["health", ""]
+            },
+            "description": "✅ Test if API is running - Should return 200 OK"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Patient Registration",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const responseJson = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', responseJson.tokens.access);",
+                  "    pm.collectionVariables.set('refresh_token', responseJson.tokens.refresh);",
+                  "    pm.collectionVariables.set('user_id', responseJson.user.id);",
+                  "    console.log('✅ Registration successful - Tokens saved!');",
+                  "    pm.test('Registration successful', function () {",
+                  "        pm.response.to.have.status(201);",
+                  "        pm.expect(responseJson).to.have.property('tokens');",
+                  "        pm.expect(responseJson).to.have.property('user');",
+                  "    });",
+                  "} else {",
+                  "    console.log('❌ Registration failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"john.smith@example.com\",\n    \"password\": \"SecurePass123!\",\n    \"password_confirm\": \"SecurePass123!\",\n    \"first_name\": \"John\",\n    \"last_name\": \"Smith\",\n    \"phone_number\": \"+61412345678\",\n    \"date_of_birth\": \"1990-01-15\",\n    \"address_line_1\": \"123 Collins Street\",\n    \"suburb\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"postcode\": \"3000\",\n    \"medicare_number\": \"1234567890\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register/patient/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "register", "patient", ""]
+            },
+            "description": "✅ Register new patient - Should return 201 with JWT tokens"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Patient Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const responseJson = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', responseJson.access);",
+                  "    pm.collectionVariables.set('refresh_token', responseJson.refresh);",
+                  "    console.log('✅ Login successful - Tokens saved!');",
+                  "    pm.test('Login successful', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "        pm.expect(responseJson).to.have.property('access');",
+                  "        pm.expect(responseJson).to.have.property('refresh');",
+                  "    });",
+                  "} else {",
+                  "    console.log('❌ Login failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"john.smith@example.com\",\n    \"password\": \"SecurePass123!\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/login/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "login", ""]
+            },
+            "description": "✅ Login with email/password - Should return 200 with JWT tokens"
+          },
+          "response": []
+        },
+        {
+          "name": "4. Get User Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/profile/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "profile", ""]
+            },
+            "description": "✅ Get user profile - Should return 200 with user data"
+          },
+          "response": []
+        },
+        {
+          "name": "5. Patient Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/dashboard/patient/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "dashboard", "patient", ""]
+            },
+            "description": "✅ Get patient dashboard - Should return 200 with dashboard data"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🔐 Authentication",
+      "item": [
+        {
+          "name": "Patient Registration",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const responseJson = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', responseJson.tokens.access);",
+                  "    pm.collectionVariables.set('refresh_token', responseJson.tokens.refresh);",
+                  "    pm.collectionVariables.set('user_id', responseJson.user.id);",
+                  "    console.log('✅ Registration successful - Tokens saved!');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"jane.doe@example.com\",\n    \"password\": \"Password123!\",\n    \"password_confirm\": \"Password123!\",\n    \"first_name\": \"Jane\",\n    \"last_name\": \"Doe\",\n    \"phone_number\": \"0412345678\",\n    \"date_of_birth\": \"1985-05-20\",\n    \"address_line_1\": \"456 Bourke Street\",\n    \"suburb\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"postcode\": \"3000\",\n    \"medicare_number\": \"9876543210\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register/patient/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "register", "patient", ""]
+            },
+            "description": "Register a new patient with complete information"
+          },
+          "response": []
+        },
+        {
+          "name": "Patient Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const responseJson = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', responseJson.access);",
+                  "    pm.collectionVariables.set('refresh_token', responseJson.refresh);",
+                  "    console.log('✅ Login successful - Tokens saved!');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"jane.doe@example.com\",\n    \"password\": \"Password123!\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/login/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "login", ""]
+            },
+            "description": "Login with email and password to get JWT tokens"
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"refresh\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/refresh/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "refresh", ""]
+            },
+            "description": "Refresh access token using refresh token"
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"token\": \"{{access_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/verify/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "verify", ""]
+            },
+            "description": "Verify if access token is valid"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "👤 User Management",
+      "item": [
+        {
+          "name": "Get User Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/profile/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "profile", ""]
+            },
+            "description": "Get current user profile information"
+          },
+          "response": []
+        },
+        {
+          "name": "Update User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"first_name\": \"John Updated\",\n    \"last_name\": \"Smith Updated\",\n    \"phone_number\": \"+61412345679\",\n    \"address_line_1\": \"456 Updated Street\",\n    \"suburb\": \"Sydney\",\n    \"state\": \"NSW\",\n    \"postcode\": \"2000\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/profile/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "profile", ""]
+            },
+            "description": "Update user profile information"
+          },
+          "response": []
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"old_password\": \"Password123!\",\n    \"new_password\": \"NewPassword123!\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/change-password/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "change-password", ""]
+            },
+            "description": "Change user password"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "📋 Intake Forms",
+      "item": [
+        {
+          "name": "Get Intake Form",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/intake-form/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "intake-form", ""]
+            },
+            "description": "Get patient intake form data"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Intake Form",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"preferred_name\": \"Johnny\",\n    \"gender_identity\": \"Male\",\n    \"pronouns\": \"He/Him\",\n    \"emergency_contact_name\": \"Jane Smith\",\n    \"emergency_contact_relationship\": \"Mother\",\n    \"emergency_contact_phone\": \"+61412345679\",\n    \"referral_source\": \"GP\",\n    \"has_gp_referral\": true,\n    \"gp_name\": \"Dr. Sarah Wilson\",\n    \"gp_practice_name\": \"Collins Street Medical Centre\",\n    \"previous_therapy\": true,\n    \"previous_therapy_details\": \"Saw psychologist for 6 months in 2020\",\n    \"current_medications\": \"Sertraline 50mg daily\",\n    \"medical_conditions\": \"Anxiety disorder, diagnosed 2020\",\n    \"presenting_concerns\": \"Experiencing anxiety about work and social situations\",\n    \"therapy_goals\": \"Reduce anxiety, improve sleep, build confidence\",\n    \"consent_to_treatment\": true,\n    \"consent_to_telehealth\": true,\n    \"intake_completed\": true\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/intake-form/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "intake-form", ""]
+            },
+            "description": "Update patient intake form with detailed information"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "📊 Dashboards",
+      "item": [
+        {
+          "name": "Patient Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/dashboard/patient/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "dashboard", "patient", ""]
+            },
+            "description": "Get patient dashboard data"
+          },
+          "response": []
+        },
+        {
+          "name": "Psychologist Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/dashboard/psychologist/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "dashboard", "psychologist", ""]
+            },
+            "description": "Get psychologist dashboard data"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "📝 Progress Notes",
+      "item": [
+        {
+          "name": "Get Progress Notes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/progress-notes/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "progress-notes", ""]
+            },
+            "description": "Get all progress notes for current user"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Progress Note",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"patient\": {{user_id}},\n    \"session_date\": \"2025-01-15T14:00:00Z\",\n    \"session_number\": 1,\n    \"subjective\": \"Patient reported feeling anxious about work and social situations. Described difficulty sleeping and constant worry.\",\n    \"objective\": \"Patient appeared tense, fidgeting with hands. Made good eye contact. Expressed concerns clearly.\",\n    \"assessment\": \"Patient presents with symptoms consistent with generalized anxiety disorder. Good insight into condition.\",\n    \"plan\": \"Continue CBT techniques, focus on relaxation strategies, schedule follow-up in 1 week.\",\n    \"session_duration\": 50,\n    \"progress_rating\": 6\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/progress-notes/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "progress-notes", ""]
+            },
+            "description": "Create a new progress note (SOAP format)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Progress Notes by Patient",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/progress-notes/by_patient/?patient_id={{user_id}}",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "progress-notes", "by_patient", ""],
+              "query": [
+                {
+                  "key": "patient_id",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Get progress notes for a specific patient"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🧪 Test Cases - Error Handling",
+      "item": [
+        {
+          "name": "❌ Registration - Password Mismatch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test.mismatch@example.com\",\n    \"password\": \"Password123!\",\n    \"password_confirm\": \"DifferentPassword123!\",\n    \"first_name\": \"Test\",\n    \"last_name\": \"Mismatch\",\n    \"phone_number\": \"+61412345678\",\n    \"date_of_birth\": \"1990-01-01\",\n    \"address_line_1\": \"123 Test Street\",\n    \"suburb\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"postcode\": \"3000\",\n    \"medicare_number\": \"1234567890\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register/patient/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "register", "patient", ""]
+            },
+            "description": "❌ Test registration with password mismatch - Should return 400"
+          },
+          "response": []
+        },
+        {
+          "name": "❌ Registration - Invalid Phone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test.invalid.phone@example.com\",\n    \"password\": \"Password123!\",\n    \"password_confirm\": \"Password123!\",\n    \"first_name\": \"Test\",\n    \"last_name\": \"InvalidPhone\",\n    \"phone_number\": \"123456789\",\n    \"date_of_birth\": \"1990-01-01\",\n    \"address_line_1\": \"123 Test Street\",\n    \"suburb\": \"Melbourne\",\n    \"state\": \"VIC\",\n    \"postcode\": \"3000\",\n    \"medicare_number\": \"1234567890\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register/patient/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "register", "patient", ""]
+            },
+            "description": "❌ Test registration with invalid phone number - Should return 400"
+          },
+          "response": []
+        },
+        {
+          "name": "❌ Registration - Invalid State",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test.invalid.state@example.com\",\n    \"password\": \"Password123!\",\n    \"password_confirm\": \"Password123!\",\n    \"first_name\": \"Test\",\n    \"last_name\": \"InvalidState\",\n    \"phone_number\": \"+61412345678\",\n    \"date_of_birth\": \"1990-01-01\",\n    \"address_line_1\": \"123 Test Street\",\n    \"suburb\": \"Melbourne\",\n    \"state\": \"INVALID\",\n    \"postcode\": \"3000\",\n    \"medicare_number\": \"1234567890\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register/patient/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "register", "patient", ""]
+            },
+            "description": "❌ Test registration with invalid state - Should return 400"
+          },
+          "response": []
+        },
+        {
+          "name": "❌ Registration - Missing Fields",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test.missing@example.com\",\n    \"password\": \"Password123!\"\n}"
+            },
+            "url": {
+              "raw": "{{api_url}}/auth/register/patient/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "register", "patient", ""]
+            },
+            "description": "❌ Test registration with missing required fields - Should return 400"
+          },
+          "response": []
+        },
+        {
+          "name": "❌ Unauthorized Access",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/auth/profile/",
+              "host": ["{{api_url}}"],
+              "path": ["auth", "profile", ""]
+            },
+            "description": "❌ Test accessing protected endpoint without token - Should return 401"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-set authorization header if token exists",
+          "if (pm.collectionVariables.get('access_token')) {",
+          "    pm.request.headers.add({",
+          "        key: 'Authorization',",
+          "        value: 'Bearer ' + pm.collectionVariables.get('access_token')",
+          "    });",
+          "    console.log('🔐 Authorization header set with token');",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global test to check response time",
+          "pm.test('⏱️ Response time is less than 5000ms', function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+          "});",
+          "",
+          "// Global test to check response has body",
+          "pm.test('📄 Response has body', function () {",
+          "    pm.expect(pm.response.text()).to.not.be.empty;",
+          "});",
+          "",
+          "// Global test to check response is JSON",
+          "pm.test('📋 Response is JSON', function () {",
+          "    pm.response.to.be.json;",
+          "});",
+          "",
+          "// Log response for debugging",
+          "console.log('📊 Response Status:', pm.response.status);",
+          "console.log('📊 Response Time:', pm.response.responseTime + 'ms');"
+        ]
+      }
+    }
+  ]
+}

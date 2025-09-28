@@ -1,0 +1,52 @@
+{
+    "name": "psychology_clinic_backend",
+    "description": "Django-based back end for the psychology clinic website.",
+    "technologies": {
+      "language": "Python",
+      "framework": "Django",
+      "database": ["PostgreSQL", "SQLite for development"],
+      "api": "Django REST Framework",
+      "authentication": "Django's built-in Auth",
+      "task_queue": "Celery (for automated messages)"
+    },
+    "apps": [
+      {
+        "name": "core",
+        "description": "Handles project-wide settings and core views."
+      },
+      {
+        "name": "users",
+        "description": "Manages user accounts (clients and psychologists) and authentication."
+      },
+      {
+        "name": "services",
+        "description": "Manages services, specialisations, and psychologist profiles."
+      },
+      {
+        "name": "appointments",
+        "description": "Manages the booking system, availability, and scheduling."
+      },
+      {
+        "name": "billing",
+        "description": "Manages payments, invoices, and Medicare rebates."
+      },
+      {
+        "name": "resources",
+        "description": "Manages blog posts and other content."
+      }
+    ],
+    "api_endpoints": [
+      "/api/services/",
+      "/api/psychologists/",
+      "/api/appointments/",
+      "/api/users/register/",
+      "/api/auth/login/",
+      "/api/payments/process/",
+      "/api/videocall/create/"
+    ],
+    "third_party_integrations": [
+      "Stripe (for payment processing)",
+      "Twilio/Agora.io (for video calls)",
+      "WhatsApp Business API (for message notifications)"
+    ]
+  }
