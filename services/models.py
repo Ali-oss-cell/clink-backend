@@ -230,6 +230,140 @@ class PsychologistProfile(models.Model):
         null=True
     )
     
+    # Practice Details
+    practice_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Name of the practice or clinic"
+    )
+    
+    practice_address = models.TextField(
+        blank=True,
+        help_text="Practice address"
+    )
+    
+    practice_phone = models.CharField(
+        max_length=15,
+        blank=True,
+        help_text="Practice phone number"
+    )
+    
+    practice_email = models.EmailField(
+        blank=True,
+        help_text="Practice email address"
+    )
+    
+    personal_website = models.URLField(
+        blank=True,
+        help_text="Personal or professional website"
+    )
+    
+    # Communication
+    languages_spoken = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Languages spoken (comma-separated)"
+    )
+    
+    session_types = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Types of sessions offered (Individual, Couples, Group)"
+    )
+    
+    # Insurance & Billing
+    insurance_providers = models.CharField(
+        max_length=300,
+        blank=True,
+        help_text="Insurance providers accepted (comma-separated)"
+    )
+    
+    billing_methods = models.CharField(
+        max_length=300,
+        blank=True,
+        help_text="Billing methods available"
+    )
+    
+    medicare_rebate_amount = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=87.45,
+        help_text="Medicare rebate amount in AUD"
+    )
+    
+    # Availability Details
+    working_hours = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Working hours (e.g., 'Monday-Friday, 9AM-5PM')"
+    )
+    
+    working_days = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Working days (comma-separated: Monday,Tuesday,Wednesday)"
+    )
+    
+    start_time = models.TimeField(
+        null=True,
+        blank=True,
+        help_text="Standard start time for work day"
+    )
+    
+    end_time = models.TimeField(
+        null=True,
+        blank=True,
+        help_text="Standard end time for work day"
+    )
+    
+    session_duration_minutes = models.PositiveIntegerField(
+        default=50,
+        help_text="Standard session duration in minutes"
+    )
+    
+    break_between_sessions_minutes = models.PositiveIntegerField(
+        default=10,
+        help_text="Break between sessions in minutes"
+    )
+    
+    telehealth_available = models.BooleanField(
+        default=True,
+        help_text="Available for telehealth sessions"
+    )
+    
+    in_person_available = models.BooleanField(
+        default=True,
+        help_text="Available for in-person sessions"
+    )
+    
+    # Professional Statistics
+    total_patients_seen = models.PositiveIntegerField(
+        default=0,
+        help_text="Total number of patients seen"
+    )
+    
+    currently_active_patients = models.PositiveIntegerField(
+        default=0,
+        help_text="Currently active patients"
+    )
+    
+    sessions_completed = models.PositiveIntegerField(
+        default=0,
+        help_text="Total sessions completed"
+    )
+    
+    average_rating = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=0.00,
+        help_text="Average patient rating (0-5)"
+    )
+    
+    total_reviews = models.PositiveIntegerField(
+        default=0,
+        help_text="Total number of reviews"
+    )
+    
     # Status
     is_active_practitioner = models.BooleanField(
         default=True,
@@ -256,3 +390,79 @@ class PsychologistProfile(models.Model):
     def display_name(self):
         """Professional display name"""
         return f"{self.title} {self.user.get_full_name()}"
+    
+    @property
+    def patient_cost_after_rebate(self):
+        """Calculate patient out-of-pocket cost after Medicare rebate"""
+        from decimal import Decimal
+        return float(self.consultation_fee) - float(self.medicare_rebate_amount)
+    
+    @property
+    def languages_list(self):
+        """Return languages as a list"""
+        if self.languages_spoken:
+            return [lang.strip() for lang in self.languages_spoken.split(',')]
+        return []
+    
+    @property
+    def session_types_list(self):
+        """Return session types as a list"""
+        if self.session_types:
+            return [session.strip() for session in self.session_types.split(',')]
+        return []
+    
+    @property
+    def insurance_providers_list(self):
+        """Return insurance providers as a list"""
+        if self.insurance_providers:
+            return [provider.strip() for provider in self.insurance_providers.split(',')]
+        return []
+    
+    @property
+    def is_highly_rated(self):
+        """Check if psychologist has high ratings"""
+        return self.average_rating >= 4.5 and self.total_reviews >= 10
+    
+    @property
+    def experience_level(self):
+        """Return experience level based on years"""
+        if self.years_experience >= 10:
+            return "Senior"
+        elif self.years_experience >= 5:
+            return "Experienced"
+        elif self.years_experience >= 2:
+            return "Mid-level"
+        else:
+            return "Junior"
+    
+    @property
+    def working_days_list(self):
+        """Return working days as a list"""
+        if self.working_days:
+            return [day.strip() for day in self.working_days.split(',')]
+        return []
+    
+    def get_next_available_slot(self, service_id=None):
+        """
+        Get the next available appointment slot for this psychologist
+        
+        Args:
+            service_id: Optional service ID to filter by
+            
+        Returns:
+            datetime or None: Next available slot datetime
+        """
+        from appointments.models import TimeSlot
+        from django.utils import timezone
+        
+        # Get available time slots starting from now
+        now = timezone.now()
+        available_slots = TimeSlot.objects.filter(
+            availability_slot__psychologist=self.user,
+            is_available=True,
+            start_time__gte=now
+        ).order_by('start_time')
+        
+        if available_slots.exists():
+            return available_slots.first().start_time
+        return None

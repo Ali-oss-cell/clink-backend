@@ -34,6 +34,11 @@ urlpatterns = [
     path('dashboard/psychologist/', views.PsychologistDashboardView.as_view(), name='psychologist-dashboard'),
     path('dashboard/patient/', views.PatientDashboardView.as_view(), name='patient-dashboard'),
     
+    # Enhanced Patient Management
+    path('patients/', views.PatientManagementView.as_view(), name='patient-management'),
+    path('patients/<int:patient_id>/', views.PatientDetailView.as_view(), name='patient-detail'),
+    path('patients/<int:patient_id>/progress/', views.PatientProgressView.as_view(), name='patient-progress'),
+    
     # ViewSets
     path('', include(router.urls)),
 ]

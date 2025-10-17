@@ -12,16 +12,28 @@ from django.utils import timezone
 class User(AbstractUser):
     """
     Custom User model with role-based permissions for psychology clinic
+    
+    Extends Django's AbstractUser to support multiple user types:
+    - Patients: Can book appointments, complete intake forms
+    - Psychologists: Can manage appointments, write progress notes
+    - Practice Managers: Can manage all clinic operations
+    - Admins: Full system access
     """
     
     class UserRole(models.TextChoices):
+        """User role choices for the psychology clinic"""
         PATIENT = 'patient', 'Patient'
         PSYCHOLOGIST = 'psychologist', 'Psychologist'
         PRACTICE_MANAGER = 'practice_manager', 'Practice Manager'
         ADMIN = 'admin', 'Admin'
     
     # Basic Information
-    email = models.EmailField(unique=True)
+    email = models.EmailField(
+        unique=True,
+        help_text="Primary email address for login and communication"
+    )
+    
+    # Australian phone number validation
     phone_regex = RegexValidator(
         regex=r'^\+?61[0-9]{9}$|^0[0-9]{9}$',
         message="Phone number must be in Australian format: +61XXXXXXXXX or 0XXXXXXXXX"
@@ -30,7 +42,7 @@ class User(AbstractUser):
         validators=[phone_regex], 
         max_length=15, 
         blank=True,
-        help_text="Australian phone number format"
+        help_text="Australian phone number format (+61XXXXXXXXX or 0XXXXXXXXX)"
     )
     
     # Role and Status
@@ -43,13 +55,40 @@ class User(AbstractUser):
     
     is_verified = models.BooleanField(
         default=False,
-        help_text="Email verification status"
+        help_text="Email verification status - required for full system access"
     )
     
     # Profile Information
-    date_of_birth = models.DateField(null=True, blank=True)
-    address_line_1 = models.CharField(max_length=255, blank=True)
-    suburb = models.CharField(max_length=100, blank=True)
+    date_of_birth = models.DateField(
+        null=True, 
+        blank=True,
+        help_text="Date of birth for age calculation and healthcare records"
+    )
+    
+    gender = models.CharField(
+        max_length=20,
+        choices=[
+            ('male', 'Male'),
+            ('female', 'Female'),
+            ('non_binary', 'Non-Binary'),
+            ('prefer_not_to_say', 'Prefer not to say'),
+        ],
+        blank=True,
+        help_text="Gender identification"
+    )
+    
+    address_line_1 = models.CharField(
+        max_length=255, 
+        blank=True,
+        help_text="Street address line 1"
+    )
+    suburb = models.CharField(
+        max_length=100, 
+        blank=True,
+        help_text="Suburb or city"
+    )
+    
+    # Australian states and territories
     state = models.CharField(
         max_length=3,
         choices=[
@@ -62,12 +101,22 @@ class User(AbstractUser):
             ('ACT', 'Australian Capital Territory'),
             ('NT', 'Northern Territory'),
         ],
-        blank=True
+        blank=True,
+        help_text="Australian state or territory"
     )
-    postcode = models.CharField(max_length=4, blank=True)
+    postcode = models.CharField(
+        max_length=4, 
+        blank=True,
+        help_text="Australian postcode (4 digits)"
+    )
     
     # Healthcare Information
-    medicare_number = models.CharField(max_length=10, blank=True, null=True)
+    medicare_number = models.CharField(
+        max_length=10, 
+        blank=True, 
+        null=True,
+        help_text="Medicare number for healthcare billing"
+    )
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -87,7 +136,12 @@ class User(AbstractUser):
     
     @property
     def age(self):
-        """Calculate age from date_of_birth"""
+        """
+        Calculate age from date_of_birth
+        
+        Returns:
+            int or None: Age in years, or None if date_of_birth is not set
+        """
         if self.date_of_birth:
             today = timezone.now().date()
             return today.year - self.date_of_birth.year - (
@@ -95,16 +149,21 @@ class User(AbstractUser):
             )
         return None
     
+    # Role checking methods for permission control
     def is_patient(self):
+        """Check if user is a patient"""
         return self.role == self.UserRole.PATIENT
     
     def is_psychologist(self):
+        """Check if user is a psychologist"""
         return self.role == self.UserRole.PSYCHOLOGIST
     
     def is_practice_manager(self):
+        """Check if user is a practice manager"""
         return self.role == self.UserRole.PRACTICE_MANAGER
     
     def is_admin_user(self):
+        """Check if user is an admin"""
         return self.role == self.UserRole.ADMIN
 
 

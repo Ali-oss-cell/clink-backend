@@ -92,19 +92,24 @@ class PatientProfileSerializer(serializers.ModelSerializer):
 
 
 class IntakeFormSerializer(serializers.ModelSerializer):
-    """Complete intake form serializer for React frontend"""
+    """
+    Complete intake form serializer for React frontend
+    
+    Handles both user fields (pre-filled from login) and patient profile fields.
+    Includes validation for Australian healthcare compliance.
+    """
     
     # User fields (pre-filled from login)
-    first_name = serializers.CharField(source='user.first_name')
-    last_name = serializers.CharField(source='user.last_name')
-    email = serializers.EmailField(source='user.email', read_only=True)
-    phone_number = serializers.CharField(source='user.phone_number')
-    date_of_birth = serializers.DateField(source='user.date_of_birth')
-    address_line_1 = serializers.CharField(source='user.address_line_1')
-    suburb = serializers.CharField(source='user.suburb')
-    state = serializers.CharField(source='user.state')
-    postcode = serializers.CharField(source='user.postcode')
-    medicare_number = serializers.CharField(source='user.medicare_number')
+    first_name = serializers.CharField(required=True)
+    last_name = serializers.CharField(required=True)
+    email = serializers.EmailField(read_only=True)
+    phone_number = serializers.CharField(required=True)
+    date_of_birth = serializers.DateField(required=True)
+    address_line_1 = serializers.CharField(required=True)
+    suburb = serializers.CharField(required=True)
+    state = serializers.CharField(required=True)
+    postcode = serializers.CharField(required=True)
+    medicare_number = serializers.CharField(required=False, allow_blank=True)
     
     class Meta:
         model = PatientProfile
@@ -125,8 +130,35 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             'client_signature', 'consent_date', 'intake_completed'
         ]
     
+    def to_representation(self, instance):
+        """Custom representation to include user fields"""
+        data = super().to_representation(instance)
+        
+        # Add user fields to the representation
+        user = instance.user
+        data.update({
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'email': user.email,
+            'phone_number': user.phone_number,
+            'date_of_birth': user.date_of_birth,
+            'address_line_1': user.address_line_1,
+            'suburb': user.suburb,
+            'state': user.state,
+            'postcode': user.postcode,
+            'medicare_number': user.medicare_number,
+        })
+        
+        return data
+    
     def update(self, instance, validated_data):
-        # Update user fields
+        """
+        Update both user and patient profile fields
+        
+        Handles updating user fields (first_name, last_name, etc.) and
+        patient profile fields (preferred_name, emergency_contact, etc.)
+        """
+        # Extract user fields from validated_data
         user_data = {}
         user_fields = ['first_name', 'last_name', 'phone_number', 'date_of_birth',
                       'address_line_1', 'suburb', 'state', 'postcode', 'medicare_number']
@@ -135,6 +167,7 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             if field in validated_data:
                 user_data[field] = validated_data.pop(field)
         
+        # Update user fields
         if user_data:
             for key, value in user_data.items():
                 setattr(instance.user, key, value)
@@ -146,6 +179,64 @@ class IntakeFormSerializer(serializers.ModelSerializer):
         instance.save()
         
         return instance
+    
+    def validate_postcode(self, value):
+        """Validate Australian postcode format"""
+        if value and not value.isdigit():
+            raise serializers.ValidationError("Postcode must be numeric")
+        if value and len(value) != 4:
+            raise serializers.ValidationError("Australian postcode must be 4 digits")
+        return value
+    
+    def validate_phone_number(self, value):
+        """Validate Australian phone number format"""
+        if value:
+            # Remove spaces and dashes
+            cleaned = value.replace(' ', '').replace('-', '')
+            # Check if it starts with +61 or 0
+            if not (cleaned.startswith('+61') or cleaned.startswith('0')):
+                raise serializers.ValidationError(
+                    "Phone number must be in Australian format: +61XXXXXXXXX or 0XXXXXXXXX"
+                )
+        return value
+    
+    def validate_state(self, value):
+        """Validate Australian state/territory"""
+        valid_states = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']
+        if value and value not in valid_states:
+            raise serializers.ValidationError(
+                f"State must be one of: {', '.join(valid_states)}"
+            )
+        return value
+    
+    def validate_consent_to_treatment(self, value):
+        """Validate consent to treatment is given"""
+        if not value:
+            raise serializers.ValidationError(
+                "Consent to treatment is required to proceed"
+            )
+        return value
+    
+    def validate(self, attrs):
+        """Cross-field validation"""
+        # Check if GP referral details are provided when has_gp_referral is True
+        if attrs.get('has_gp_referral', False):
+            if not attrs.get('gp_name'):
+                raise serializers.ValidationError(
+                    "GP name is required when GP referral is indicated"
+                )
+            if not attrs.get('gp_practice_name'):
+                raise serializers.ValidationError(
+                    "GP practice name is required when GP referral is indicated"
+                )
+        
+        # Check if emergency contact details are provided
+        if attrs.get('emergency_contact_name') and not attrs.get('emergency_contact_phone'):
+            raise serializers.ValidationError(
+                "Emergency contact phone is required when emergency contact name is provided"
+            )
+        
+        return attrs
 
 
 class ProgressNoteSerializer(serializers.ModelSerializer):
@@ -189,11 +280,22 @@ class ProgressNoteCreateSerializer(serializers.ModelSerializer):
 class PsychologistDashboardSerializer(serializers.Serializer):
     """Dashboard data for psychologists"""
     
+    # Today's statistics
     today_appointments = serializers.IntegerField()
+    completed_today = serializers.IntegerField()
+    pending_today = serializers.IntegerField()
+    
+    # Overall statistics
     total_patients = serializers.IntegerField()
-    pending_notes = serializers.IntegerField()
+    total_appointments = serializers.IntegerField()
+    completed_appointments = serializers.IntegerField()
+    
+    # Data arrays
     upcoming_sessions = serializers.ListField()
-    recent_notes = ProgressNoteSerializer(many=True)
+    recent_notes = serializers.ListField()
+    
+    # Quick actions
+    quick_actions = serializers.DictField()
 
 
 class PatientDashboardSerializer(serializers.Serializer):

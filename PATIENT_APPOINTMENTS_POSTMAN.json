@@ -1,0 +1,301 @@
+{
+  "info": {
+    "name": "Patient Appointments API",
+    "description": "Patient Appointments List endpoint for the psychology clinic system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get All Appointments",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/appointments/patient/appointments/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "appointments",
+            "patient",
+            "appointments",
+            ""
+          ]
+        },
+        "description": "Get all appointments for the authenticated patient with default pagination (10 per page)"
+      },
+      "response": []
+    },
+    {
+      "name": "Get Upcoming Appointments",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/appointments/patient/appointments/?status=upcoming",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "appointments",
+            "patient",
+            "appointments",
+            ""
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "upcoming"
+            }
+          ]
+        },
+        "description": "Get only upcoming appointments (future appointments with scheduled/confirmed status)"
+      },
+      "response": []
+    },
+    {
+      "name": "Get Completed Appointments",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/appointments/patient/appointments/?status=completed",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "appointments",
+            "patient",
+            "appointments",
+            ""
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "completed"
+            }
+          ]
+        },
+        "description": "Get all completed appointments"
+      },
+      "response": []
+    },
+    {
+      "name": "Get Cancelled Appointments",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/appointments/patient/appointments/?status=cancelled",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "appointments",
+            "patient",
+            "appointments",
+            ""
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "cancelled"
+            }
+          ]
+        },
+        "description": "Get all cancelled appointments"
+      },
+      "response": []
+    },
+    {
+      "name": "Get Past Appointments",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/appointments/patient/appointments/?status=past",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "appointments",
+            "patient",
+            "appointments",
+            ""
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "past"
+            }
+          ]
+        },
+        "description": "Get all past appointments (including completed, cancelled, no-show)"
+      },
+      "response": []
+    },
+    {
+      "name": "Get Appointments with Pagination",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/appointments/patient/appointments/?page=1&page_size=5",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "appointments",
+            "patient",
+            "appointments",
+            ""
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "page_size",
+              "value": "5"
+            }
+          ]
+        },
+        "description": "Get appointments with custom pagination (5 per page)"
+      },
+      "response": []
+    },
+    {
+      "name": "Get Upcoming Appointments with Pagination",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/appointments/patient/appointments/?status=upcoming&page=1&page_size=20",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "appointments",
+            "patient",
+            "appointments",
+            ""
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "upcoming"
+            },
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "page_size",
+              "value": "20"
+            }
+          ]
+        },
+        "description": "Get upcoming appointments with custom page size (20 per page)"
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "your_jwt_token_here",
+      "type": "string"
+    }
+  ]
+}
+

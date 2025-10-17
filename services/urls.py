@@ -8,7 +8,7 @@ from . import views
 
 router = DefaultRouter()
 router.register(r'services', views.ServiceViewSet, basename='service')
-router.register(r'psychologists', views.PsychologistViewSet, basename='psychologist')
+router.register(r'psychologists', views.PsychologistProfileViewSet, basename='psychologist')
 router.register(r'specializations', views.SpecializationViewSet, basename='specialization')
 
 urlpatterns = [
