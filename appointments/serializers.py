@@ -244,6 +244,70 @@ class AppointmentSummarySerializer(serializers.Serializer):
     recent_appointments = AppointmentSerializer(many=True, read_only=True)
 
 
+class PsychologistScheduleSerializer(serializers.ModelSerializer):
+    """
+    Serializer for psychologist schedule page
+    Returns appointments in the exact format expected by the frontend
+    """
+    
+    patient_id = serializers.IntegerField(source='patient.id', read_only=True)
+    patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    service_name = serializers.CharField(source='service.name', read_only=True)
+    formatted_date = serializers.SerializerMethodField()
+    formatted_time = serializers.SerializerMethodField()
+    meeting_link = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Appointment
+        fields = [
+            'id',
+            'patient_id',
+            'patient_name',
+            'service_name',
+            'appointment_date',
+            'formatted_date',
+            'formatted_time',
+            'duration_minutes',
+            'session_type',
+            'status',
+            'notes',
+            'location',
+            'meeting_link'
+        ]
+        read_only_fields = ['id', 'patient_id', 'patient_name', 'service_name']
+    
+    def get_formatted_date(self, obj):
+        """Format date as "20 Jul 2024" """
+        return obj.appointment_date.strftime('%d %b %Y')
+    
+    def get_formatted_time(self, obj):
+        """Format time as "10:00 AM" """
+        return obj.appointment_date.strftime('%I:%M %p').lstrip('0')
+    
+    def get_meeting_link(self, obj):
+        """Generate meeting link from video_room_id if telehealth"""
+        if obj.session_type == 'telehealth' and obj.video_room_id:
+            # Generate meeting link from video room ID
+            # Adjust this URL format based on your video service (Twilio, Zoom, etc.)
+            from django.conf import settings
+            base_url = getattr(settings, 'VIDEO_MEETING_BASE_URL', 'https://meet.psychologyclinic.com.au')
+            return f"{base_url}/{obj.video_room_id}"
+        return None
+    
+    def get_location(self, obj):
+        """Get location if in-person appointment"""
+        if obj.session_type == 'in_person':
+            # You can customize this based on your location field or psychologist's location
+            # For now, return a default or psychologist's office location
+            if hasattr(obj.psychologist, 'psychologist_profile'):
+                profile = obj.psychologist.psychologist_profile
+                if hasattr(profile, 'office_address'):
+                    return profile.office_address
+            return "Clinic Office"  # Default location
+        return None
+
+
 class PatientAppointmentDetailSerializer(serializers.ModelSerializer):
     """
     Detailed appointment serializer for patient portal

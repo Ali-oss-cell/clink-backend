@@ -39,4 +39,9 @@ urlpatterns = [
     
     # Patient Portal API
     path('patient/appointments/', views.PatientAppointmentsListView.as_view(), name='patient-appointments-list'),
+    
+    # Psychologist Schedule API
+    path('psychologist/schedule/', views.PsychologistScheduleView.as_view(), name='psychologist-schedule'),
+    path('complete-session/<int:appointment_id>/', views.CompleteSessionView.as_view(), name='complete-session'),
+    path('appointment-actions/<int:appointment_id>/', views.AppointmentActionsView.as_view(), name='appointment-actions'),
 ]

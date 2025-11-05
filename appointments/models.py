@@ -80,6 +80,33 @@ class Appointment(models.Model):
         help_text="Twilio video room ID for telehealth sessions"
     )
     
+    # Appointment lifecycle timestamps
+    completed_at = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text="When the appointment was completed"
+    )
+    cancelled_at = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text="When the appointment was cancelled"
+    )
+    rescheduled_at = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text="When the appointment was rescheduled"
+    )
+    
+    # Cancellation and rescheduling details
+    cancellation_reason = models.TextField(
+        blank=True,
+        help_text="Reason for cancellation"
+    )
+    reschedule_reason = models.TextField(
+        blank=True,
+        help_text="Reason for rescheduling"
+    )
+    
     # Timestamps for audit trail
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

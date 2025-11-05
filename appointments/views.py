@@ -17,7 +17,7 @@ from .serializers import (
     AppointmentSerializer, AppointmentCreateSerializer, AvailabilitySlotSerializer,
     TimeSlotSerializer, BookAppointmentSerializer, AppointmentStatusSerializer,
     PsychologistAvailabilitySerializer, AppointmentSummarySerializer,
-    PatientAppointmentDetailSerializer
+    PatientAppointmentDetailSerializer, PsychologistScheduleSerializer
 )
 from services.models import Service
 
@@ -543,6 +543,173 @@ class UpcomingAppointmentsView(APIView):
         
         serializer = AppointmentSerializer(appointments, many=True)
         return Response(serializer.data)
+
+
+class PsychologistScheduleView(APIView):
+    """
+    Get psychologist schedule with formatted appointment data
+    
+    Returns appointments in the exact format expected by the frontend schedule page.
+    Supports filtering by date range and status.
+    
+    GET /api/appointments/psychologist/schedule/
+    
+    Query Parameters:
+    - start_date: Filter appointments from this date (ISO format: YYYY-MM-DD)
+    - end_date: Filter appointments until this date (ISO format: YYYY-MM-DD)
+    - status: Filter by status (scheduled, confirmed, completed, cancelled, all)
+    - page: Page number for pagination (default: 1)
+    - page_size: Results per page (default: 50)
+    """
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        
+        # Check if user is a psychologist
+        if not user.is_psychologist():
+            return Response(
+                {'error': 'Only psychologists can access this endpoint'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Get query parameters
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        month = request.query_params.get('month')  # Format: YYYY-MM
+        year = request.query_params.get('year')    # Format: YYYY
+        status_filter = request.query_params.get('status', 'all')
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 50))
+        
+        # Base queryset - psychologist's appointments
+        queryset = Appointment.objects.filter(
+            psychologist=user
+        ).select_related(
+            'patient',
+            'service'
+        ).order_by('appointment_date')
+        
+        # Apply date filters
+        if start_date:
+            try:
+                from datetime import datetime
+                start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+                start_datetime = timezone.make_aware(start_datetime)
+                queryset = queryset.filter(appointment_date__gte=start_datetime)
+            except ValueError:
+                return Response(
+                    {'error': 'Invalid start_date format. Use YYYY-MM-DD'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        if end_date:
+            try:
+                from datetime import datetime, timedelta
+                end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
+                end_datetime = timezone.make_aware(end_datetime) + timedelta(days=1)
+                queryset = queryset.filter(appointment_date__lt=end_datetime)
+            except ValueError:
+                return Response(
+                    {'error': 'Invalid end_date format. Use YYYY-MM-DD'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Apply month filter (for calendar view)
+        if month:
+            try:
+                from datetime import datetime
+                month_date = datetime.strptime(month, '%Y-%m')
+                start_of_month = timezone.make_aware(month_date.replace(day=1))
+                if month_date.month == 12:
+                    end_of_month = timezone.make_aware(month_date.replace(year=month_date.year + 1, month=1, day=1))
+                else:
+                    end_of_month = timezone.make_aware(month_date.replace(month=month_date.month + 1, day=1))
+                
+                queryset = queryset.filter(
+                    appointment_date__gte=start_of_month,
+                    appointment_date__lt=end_of_month
+                )
+            except ValueError:
+                return Response(
+                    {'error': 'Invalid month format. Use YYYY-MM'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Apply year filter
+        if year:
+            try:
+                from datetime import datetime
+                year_int = int(year)
+                start_of_year = timezone.make_aware(datetime(year_int, 1, 1))
+                end_of_year = timezone.make_aware(datetime(year_int + 1, 1, 1))
+                
+                queryset = queryset.filter(
+                    appointment_date__gte=start_of_year,
+                    appointment_date__lt=end_of_year
+                )
+            except ValueError:
+                return Response(
+                    {'error': 'Invalid year format. Use YYYY'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Apply status filter
+        if status_filter != 'all':
+            if status_filter in ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']:
+                queryset = queryset.filter(status=status_filter)
+            else:
+                return Response(
+                    {'error': f'Invalid status filter: {status_filter}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Count total results
+        total_count = queryset.count()
+        
+        # Apply pagination
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+        paginated_queryset = queryset[start_index:end_index]
+        
+        # Serialize data
+        serializer = PsychologistScheduleSerializer(paginated_queryset, many=True)
+        
+        # Build pagination URLs
+        base_url = request.build_absolute_uri(request.path)
+        next_url = None
+        previous_url = None
+        
+        # Calculate if there's a next page
+        if end_index < total_count:
+            next_page = page + 1
+            next_url = f"{base_url}?page={next_page}&page_size={page_size}"
+            if status_filter != 'all':
+                next_url += f"&status={status_filter}"
+            if start_date:
+                next_url += f"&start_date={start_date}"
+            if end_date:
+                next_url += f"&end_date={end_date}"
+        
+        # Calculate if there's a previous page
+        if page > 1:
+            previous_page = page - 1
+            previous_url = f"{base_url}?page={previous_page}&page_size={page_size}"
+            if status_filter != 'all':
+                previous_url += f"&status={status_filter}"
+            if start_date:
+                previous_url += f"&start_date={start_date}"
+            if end_date:
+                previous_url += f"&end_date={end_date}"
+        
+        # Build response in expected format
+        return Response({
+            'count': total_count,
+            'next': next_url,
+            'previous': previous_url,
+            'results': serializer.data
+        })
 
 
 class AppointmentSummaryView(APIView):
@@ -1103,3 +1270,189 @@ class PatientAppointmentsListView(APIView):
         }
         
         return Response(response_data)
+
+
+class CompleteSessionView(APIView):
+    """
+    Complete a therapy session
+    
+    Updates appointment status to 'completed' and creates a progress note
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, appointment_id):
+        """Complete a session and optionally create a progress note"""
+        try:
+            appointment = Appointment.objects.get(
+                id=appointment_id,
+                psychologist=request.user
+            )
+        except Appointment.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found or access denied'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Check if appointment can be completed
+        if appointment.status not in ['scheduled', 'confirmed']:
+            return Response(
+                {'error': f'Cannot complete appointment with status: {appointment.status}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Update appointment status
+        appointment.status = 'completed'
+        appointment.completed_at = timezone.now()
+        appointment.save()
+        
+        # Create progress note if provided
+        progress_note_data = request.data.get('progress_note', {})
+        if progress_note_data:
+            from users.models import ProgressNote
+            
+            # Validate required fields for SOAP note
+            required_fields = ['subjective', 'objective', 'assessment', 'plan']
+            missing_fields = [field for field in required_fields if not progress_note_data.get(field)]
+            
+            if missing_fields:
+                return Response(
+                    {'error': f'Missing required fields for progress note: {", ".join(missing_fields)}'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Create progress note
+            progress_note = ProgressNote.objects.create(
+                psychologist=request.user,
+                patient=appointment.patient,
+                session_date=appointment.appointment_date,
+                subjective=progress_note_data.get('subjective', ''),
+                objective=progress_note_data.get('objective', ''),
+                assessment=progress_note_data.get('assessment', ''),
+                plan=progress_note_data.get('plan', ''),
+                progress_rating=progress_note_data.get('progress_rating'),
+                notes=progress_note_data.get('notes', '')
+            )
+            
+            # Update psychologist statistics
+            psychologist_profile = request.user.psychologist_profile
+            psychologist_profile.sessions_completed += 1
+            psychologist_profile.save()
+        
+        # Serialize updated appointment
+        from .serializers import PsychologistScheduleSerializer
+        serializer = PsychologistScheduleSerializer(appointment)
+        
+        return Response({
+            'message': 'Session completed successfully',
+            'appointment': serializer.data
+        })
+
+
+class AppointmentActionsView(APIView):
+    """
+    Handle appointment actions: cancel, reschedule
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, appointment_id):
+        """Handle appointment actions"""
+        action = request.data.get('action')
+        
+        if action not in ['cancel', 'reschedule']:
+            return Response(
+                {'error': 'Invalid action. Must be "cancel" or "reschedule"'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            appointment = Appointment.objects.get(
+                id=appointment_id,
+                psychologist=request.user
+            )
+        except Appointment.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found or access denied'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        if action == 'cancel':
+            return self._cancel_appointment(appointment, request.data)
+        elif action == 'reschedule':
+            return self._reschedule_appointment(appointment, request.data)
+    
+    def _cancel_appointment(self, appointment, data):
+        """Cancel an appointment"""
+        if appointment.status in ['completed', 'cancelled']:
+            return Response(
+                {'error': f'Cannot cancel appointment with status: {appointment.status}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Update appointment status
+        appointment.status = 'cancelled'
+        appointment.cancellation_reason = data.get('reason', '')
+        appointment.cancelled_at = timezone.now()
+        appointment.save()
+        
+        # Serialize updated appointment
+        from .serializers import PsychologistScheduleSerializer
+        serializer = PsychologistScheduleSerializer(appointment)
+        
+        return Response({
+            'message': 'Appointment cancelled successfully',
+            'appointment': serializer.data
+        })
+    
+    def _reschedule_appointment(self, appointment, data):
+        """Reschedule an appointment"""
+        if appointment.status in ['completed', 'cancelled']:
+            return Response(
+                {'error': f'Cannot reschedule appointment with status: {appointment.status}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        new_date = data.get('new_date')
+        if not new_date:
+            return Response(
+                {'error': 'new_date is required for rescheduling'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            from datetime import datetime
+            new_datetime = datetime.fromisoformat(new_date.replace('Z', '+00:00'))
+            new_datetime = timezone.make_aware(new_datetime)
+        except ValueError:
+            return Response(
+                {'error': 'Invalid new_date format. Use ISO format'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if new time slot is available
+        conflicting_appointments = Appointment.objects.filter(
+            psychologist=appointment.psychologist,
+            appointment_date=new_datetime,
+            status__in=['scheduled', 'confirmed']
+        ).exclude(id=appointment.id)
+        
+        if conflicting_appointments.exists():
+            return Response(
+                {'error': 'Time slot is not available'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Update appointment
+        appointment.appointment_date = new_datetime
+        appointment.status = 'scheduled'  # Reset to scheduled for confirmation
+        appointment.rescheduled_at = timezone.now()
+        appointment.reschedule_reason = data.get('reason', '')
+        appointment.save()
+        
+        # Serialize updated appointment
+        from .serializers import PsychologistScheduleSerializer
+        serializer = PsychologistScheduleSerializer(appointment)
+        
+        return Response({
+            'message': 'Appointment rescheduled successfully',
+            'appointment': serializer.data
+        })

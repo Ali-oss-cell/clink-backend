@@ -36,6 +36,7 @@ class PsychologistProfileSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.get_full_name', read_only=True)
     user_email = serializers.CharField(source='user.email', read_only=True)
     user_phone = serializers.CharField(source='user.phone_number', read_only=True)
+    user_gender = serializers.SerializerMethodField()
     specializations_list = SpecializationSerializer(source='specializations', many=True, read_only=True)
     services_list = ServiceSerializer(source='services_offered', many=True, read_only=True)
     
@@ -53,11 +54,14 @@ class PsychologistProfileSerializer(serializers.ModelSerializer):
     profile_image_url = serializers.SerializerMethodField()
     has_profile_image = serializers.SerializerMethodField()
     
+    # Availability field
+    next_available_slot = serializers.SerializerMethodField()
+    
     class Meta:
         model = PsychologistProfile
         fields = [
             # Basic Information
-            'id', 'user', 'user_name', 'user_email', 'user_phone',
+            'id', 'user', 'user_name', 'user_email', 'user_phone', 'user_gender',
             'display_name', 'profile_image', 'profile_image_url', 'has_profile_image',
             
             # Professional Credentials
@@ -81,7 +85,7 @@ class PsychologistProfileSerializer(serializers.ModelSerializer):
             # Availability Details
             'working_hours', 'working_days', 'start_time', 'end_time',
             'session_duration_minutes', 'break_between_sessions_minutes',
-            'telehealth_available', 'in_person_available',
+            'telehealth_available', 'in_person_available', 'next_available_slot',
             
             # Professional Statistics
             'total_patients_seen', 'currently_active_patients', 'sessions_completed',
@@ -141,6 +145,10 @@ class PsychologistProfileSerializer(serializers.ModelSerializer):
             return None
         except Exception:
             return None
+    
+    def get_user_gender(self, obj):
+        """Get user gender from the related user"""
+        return obj.user.gender if obj.user else None
 
 
 class PsychologistProfileCreateSerializer(serializers.ModelSerializer):

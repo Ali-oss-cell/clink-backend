@@ -7,8 +7,22 @@ Configured for Twilio Video, WhatsApp, Stripe, and Australian healthcare complia
 
 import os
 from pathlib import Path
-from decouple import config
 from datetime import timedelta
+
+# Try to use python-decouple if available, otherwise use os.environ
+try:
+    from decouple import config  # type: ignore
+except ImportError:
+    # Fallback if decouple is not installed
+    def config(key, default=None, cast=None):
+        value = os.environ.get(key, default)
+        if cast and value is not None:
+            if cast == bool:
+                # Handle boolean conversion for strings
+                if isinstance(value, str):
+                    return value.lower() in ('true', '1', 'yes', 'on')
+            return cast(value)
+        return value
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -57,10 +71,11 @@ LOCAL_APPS = [
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 # Development apps
-if DEBUG:
-    INSTALLED_APPS += [
-        'debug_toolbar',
-    ]
+# Debug toolbar disabled to prevent profiling conflicts
+# if DEBUG:
+#     INSTALLED_APPS += [
+#         'debug_toolbar',
+#     ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -76,10 +91,11 @@ MIDDLEWARE = [
 ]
 
 # Development middleware
-if DEBUG:
-    MIDDLEWARE += [
-        'debug_toolbar.middleware.DebugToolbarMiddleware',
-    ]
+# Debug toolbar middleware disabled to prevent profiling conflicts
+# if DEBUG:
+#     MIDDLEWARE += [
+#         'debug_toolbar.middleware.DebugToolbarMiddleware',
+#     ]
 
 ROOT_URLCONF = 'psychology_clinic.urls'
 
@@ -107,10 +123,19 @@ WSGI_APPLICATION = 'psychology_clinic.wsgi.application'
 # Use DATABASE_URL for production, SQLite for development
 DATABASE_URL = config('DATABASE_URL', default='')
 if DATABASE_URL:
-    import dj_database_url
-    DATABASES = {
-        'default': dj_database_url.parse(DATABASE_URL)
-    }
+    try:
+        import dj_database_url  # type: ignore
+        DATABASES = {
+            'default': dj_database_url.parse(DATABASE_URL)
+        }
+    except ImportError:
+        # Fallback to SQLite if dj_database_url not available
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': BASE_DIR / 'db.sqlite3',
+            }
+        }
 else:
     DATABASES = {
         'default': {

@@ -32,7 +32,16 @@ urlpatterns = [
     
     # Role-based Dashboards
     path('dashboard/psychologist/', views.PsychologistDashboardView.as_view(), name='psychologist-dashboard'),
+    path('psychologist/dashboard/', views.PsychologistDashboardView.as_view(), name='psychologist-dashboard-alt'),  # Alias for frontend
     path('dashboard/patient/', views.PatientDashboardView.as_view(), name='patient-dashboard'),
+    path('dashboard/practice-manager/', views.PracticeManagerDashboardView.as_view(), name='practice-manager-dashboard'),
+    path('practice-manager/dashboard/', views.PracticeManagerDashboardView.as_view(), name='practice-manager-dashboard-alt'),  # Alias for frontend
+    path('dashboard/admin/', views.AdminDashboardView.as_view(), name='admin-dashboard'),
+    path('admin/dashboard/', views.AdminDashboardView.as_view(), name='admin-dashboard-alt'),  # Alias for frontend
+    
+    # Admin System Management
+    path('admin/settings/', views.SystemSettingsView.as_view(), name='admin-settings'),
+    path('admin/analytics/', views.SystemAnalyticsView.as_view(), name='admin-analytics'),
     
     # Enhanced Patient Management
     path('patients/', views.PatientManagementView.as_view(), name='patient-management'),

@@ -3,19 +3,37 @@ Users app views - Authentication and user management for Psychology Clinic
 Supports intake forms, progress notes, and role-based dashboards
 """
 
-from django.contrib.auth import get_user_model
-from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.db.models import Q, Count
-from django.db import models
-from django.utils import timezone
+from django.contrib.auth import get_user_model  # type: ignore
+from rest_framework import viewsets, status, permissions  # type: ignore
+from rest_framework.decorators import action  # type: ignore
+from rest_framework.response import Response  # type: ignore
+from rest_framework.views import APIView  # type: ignore
+from rest_framework.permissions import IsAuthenticated, AllowAny  # type: ignore
+from rest_framework_simplejwt.tokens import RefreshToken  # type: ignore
+from django.db.models import Q, Count  # type: ignore
+from django.db import models  # type: ignore
+from django.utils import timezone  # type: ignore
 
 from .models import PatientProfile, ProgressNote
 from appointments.models import Appointment
+
+# Import billing models for financial calculations
+try:
+    from billing.models import Invoice, Payment, MedicareClaim
+    BILLING_AVAILABLE = True
+except ImportError:
+    BILLING_AVAILABLE = False
+    Invoice = None
+    Payment = None
+    MedicareClaim = None
+
+# Import services models for psychologist profiles
+try:
+    from services.models import PsychologistProfile
+    SERVICES_AVAILABLE = True
+except ImportError:
+    SERVICES_AVAILABLE = False
+    PsychologistProfile = None
 from .serializers import (
     UserSerializer, PatientRegistrationSerializer, PatientProfileSerializer,
     IntakeFormSerializer, ProgressNoteSerializer, ProgressNoteCreateSerializer,
@@ -237,12 +255,27 @@ class ProgressNoteViewSet(viewsets.ModelViewSet):
         user = self.request.user
         
         if user.is_psychologist():
-            return ProgressNote.objects.filter(psychologist=user)
+            # Get psychologist's notes, ordered by patient name (last_name, first_name)
+            # then by session date (newest first) for same patient
+            return ProgressNote.objects.filter(
+                psychologist=user
+            ).select_related('patient').order_by(
+                'patient__last_name',
+                'patient__first_name',
+                '-session_date'  # Newest first for same patient
+            )
         elif user.is_practice_manager() or user.is_admin_user():
-            return ProgressNote.objects.all()
+            # Managers/Admins see all notes, ordered by patient name
+            return ProgressNote.objects.all().select_related('patient').order_by(
+                'patient__last_name',
+                'patient__first_name',
+                '-session_date'
+            )
         else:
-            # Patients can see their own notes
-            return ProgressNote.objects.filter(patient=user)
+            # Patients see their own notes, ordered by session date
+            return ProgressNote.objects.filter(
+                patient=user
+            ).order_by('-session_date')
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -298,85 +331,150 @@ class PsychologistDashboardView(APIView):
         today = timezone.now().date()
         now = timezone.now()
         
-        # Get real appointment data
+        # Calculate start and end of week (Monday to Sunday)
+        from datetime import timedelta, datetime, time
+        days_since_monday = today.weekday()
+        week_start_date = today - timedelta(days=days_since_monday)
+        week_end_date = week_start_date + timedelta(days=7)
+        
+        # Convert to datetime objects
+        week_start = timezone.make_aware(datetime.combine(week_start_date, time.min))
+        week_end = timezone.make_aware(datetime.combine(week_end_date, time.min))
+        
+        # Calculate start and end of current month
+        month_start_date = today.replace(day=1)
+        if month_start_date.month == 12:
+            month_end_date = month_start_date.replace(year=month_start_date.year + 1, month=1)
+        else:
+            month_end_date = month_start_date.replace(month=month_start_date.month + 1)
+        
+        # Convert to datetime objects
+        month_start = timezone.make_aware(datetime.combine(month_start_date, time.min))
+        month_end = timezone.make_aware(datetime.combine(month_end_date, time.min))
+        
+        # Get today's appointments
         today_appointments = Appointment.objects.filter(
             psychologist=request.user,
             appointment_date__date=today
         )
+        today_appointments_count = today_appointments.count()
+        completed_sessions_today = today_appointments.filter(status='completed').count()
         
-        upcoming_appointments = Appointment.objects.filter(
+        # Get upcoming appointments this week
+        upcoming_this_week = Appointment.objects.filter(
             psychologist=request.user,
-            appointment_date__gte=now,
+            appointment_date__gte=week_start,
+            appointment_date__lt=week_end,
             status__in=['scheduled', 'confirmed']
-        ).order_by('appointment_date')[:5]
+        )
+        upcoming_appointments_this_week = upcoming_this_week.count()
         
         # Get patient statistics
-        total_patients = User.objects.filter(
+        total_patients_count = User.objects.filter(
             role=User.UserRole.PATIENT,
             progress_notes__psychologist=request.user
         ).distinct().count()
         
-        # Get recent progress notes
-        recent_notes = ProgressNote.objects.filter(
+        # Active patients (patients with appointments in last 90 days or upcoming)
+        active_date_threshold = now - timedelta(days=90)
+        active_patients_count = User.objects.filter(
+            role=User.UserRole.PATIENT
+        ).filter(
+            Q(patient_appointments__psychologist=request.user, 
+              patient_appointments__appointment_date__gte=active_date_threshold) |
+            Q(patient_appointments__psychologist=request.user,
+              patient_appointments__status__in=['scheduled', 'confirmed'])
+        ).distinct().count()
+        
+        # Get recent progress notes (last 5)
+        recent_notes_list = ProgressNote.objects.filter(
             psychologist=request.user
-        ).order_by('-created_at')[:5]
+        ).select_related('patient').order_by('-created_at')[:5]
         
-        # Calculate statistics
-        completed_today = today_appointments.filter(status='completed').count()
-        pending_today = today_appointments.filter(status__in=['scheduled', 'confirmed']).count()
+        recent_notes = [
+            {
+                'id': note.id,
+                'patient_name': note.patient.get_full_name(),
+                'session_number': note.session_number,
+                'session_date': note.session_date.isoformat() if note.session_date else None,
+                'progress_rating': note.progress_rating,
+                'created_at': note.created_at.isoformat() if note.created_at else None
+            }
+            for note in recent_notes_list
+        ]
         
-        # Get comprehensive dashboard data
+        # Calculate pending notes (completed appointments without progress notes)
+        completed_without_notes = Appointment.objects.filter(
+            psychologist=request.user,
+            status='completed',
+            completed_at__isnull=False
+        ).exclude(
+            id__in=ProgressNote.objects.filter(
+                psychologist=request.user
+            ).values_list('patient__patient_appointments__id', flat=True)
+        )
+        
+        # Better calculation: appointments completed in last 7 days without notes
+        recent_completed = Appointment.objects.filter(
+            psychologist=request.user,
+            status='completed',
+            completed_at__gte=now - timedelta(days=7)
+        )
+        
+        pending_notes_count = 0
+        for apt in recent_completed:
+            # Check if there's a note for this appointment
+            has_note = ProgressNote.objects.filter(
+                psychologist=request.user,
+                patient=apt.patient,
+                session_date__date=apt.appointment_date.date()
+            ).exists()
+            if not has_note:
+                pending_notes_count += 1
+        
+        # Calculate monthly stats
+        appointments_this_month = Appointment.objects.filter(
+            psychologist=request.user,
+            appointment_date__gte=month_start,
+            appointment_date__lt=month_end
+        )
+        total_appointments_this_month = appointments_this_month.count()
+        
+        # Get average rating from progress notes
+        progress_ratings = ProgressNote.objects.filter(
+            psychologist=request.user
+        ).exclude(progress_rating__isnull=True).values_list('progress_rating', flat=True)
+        
+        average_rating = None
+        if progress_ratings:
+            average_rating = sum(progress_ratings) / len(progress_ratings)
+            average_rating = round(average_rating, 1)
+        
+        # Sessions completed this week
+        sessions_completed_this_week = Appointment.objects.filter(
+            psychologist=request.user,
+            status='completed',
+            completed_at__gte=week_start,
+            completed_at__lt=week_end
+        ).count()
+        
+        # Build response matching frontend format
         dashboard_data = {
-            # Today's statistics
-            'today_appointments': today_appointments.count(),
-            'completed_today': completed_today,
-            'pending_today': pending_today,
-            
-            # Overall statistics
-            'total_patients': total_patients,
-            'total_appointments': Appointment.objects.filter(psychologist=request.user).count(),
-            'completed_appointments': Appointment.objects.filter(
-                psychologist=request.user, 
-                status='completed'
-            ).count(),
-            
-            # Upcoming sessions with details
-            'upcoming_sessions': [
-                {
-                    'id': apt.id,
-                    'patient_name': apt.patient.get_full_name(),
-                    'appointment_date': apt.appointment_date,
-                    'service_name': apt.service.name if apt.service else 'N/A',
-                    'status': apt.status,
-                    'duration_minutes': apt.duration_minutes
-                }
-                for apt in upcoming_appointments
-            ],
-            
-            # Recent progress notes
-            'recent_notes': [
-                {
-                    'id': note.id,
-                    'patient_name': note.patient.get_full_name(),
-                    'session_date': note.session_date,
-                    'session_number': note.session_number,
-                    'progress_rating': note.progress_rating,
-                    'created_at': note.created_at
-                }
-                for note in recent_notes
-            ],
-            
-            # Quick actions data
-            'quick_actions': {
-                'can_book_appointment': True,
-                'can_view_patients': total_patients > 0,
-                'can_write_notes': True,
-                'pending_notes_count': 0  # Will implement with appointment notes
+            'today_appointments_count': today_appointments_count,
+            'upcoming_appointments_this_week': upcoming_appointments_this_week,
+            'recent_notes': recent_notes,
+            'active_patients_count': active_patients_count,
+            'total_patients_count': total_patients_count,
+            'pending_notes_count': pending_notes_count,
+            'completed_sessions_today': completed_sessions_today,
+            'stats': {
+                'total_appointments_this_month': total_appointments_this_month,
+                'average_rating': average_rating,
+                'sessions_completed_this_week': sessions_completed_this_week
             }
         }
         
-        serializer = PsychologistDashboardSerializer(dashboard_data)
-        return Response(serializer.data)
+        return Response(dashboard_data)
 
 
 class PatientDashboardView(APIView):
@@ -475,6 +573,660 @@ class PatientDashboardView(APIView):
         
         serializer = PatientDashboardSerializer(dashboard_data)
         return Response(serializer.data)
+
+
+class PracticeManagerDashboardView(APIView):
+    """Dashboard data for practice managers"""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """
+        Get comprehensive dashboard data for practice managers
+        
+        Returns clinic-wide statistics including:
+        - Appointment statistics
+        - Revenue and financial data
+        - Staff and patient statistics
+        - Recent activity
+        """
+        if not (request.user.is_practice_manager() or request.user.is_admin_user()):
+            return Response(
+                {'error': 'Only practice managers and admins can access this dashboard'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        today = timezone.now().date()
+        now = timezone.now()
+        
+        # Calculate date ranges
+        from datetime import timedelta, datetime, time
+        days_since_monday = today.weekday()
+        week_start_date = today - timedelta(days=days_since_monday)
+        week_end_date = week_start_date + timedelta(days=7)
+        week_start = timezone.make_aware(datetime.combine(week_start_date, time.min))
+        week_end = timezone.make_aware(datetime.combine(week_end_date, time.min))
+        
+        month_start_date = today.replace(day=1)
+        if month_start_date.month == 12:
+            month_end_date = month_start_date.replace(year=month_start_date.year + 1, month=1)
+        else:
+            month_end_date = month_start_date.replace(month=month_start_date.month + 1)
+        month_start = timezone.make_aware(datetime.combine(month_start_date, time.min))
+        month_end = timezone.make_aware(datetime.combine(month_end_date, time.min))
+        
+        # Appointment Statistics
+        today_appointments = Appointment.objects.filter(appointment_date__date=today)
+        today_appointments_count = today_appointments.count()
+        completed_sessions_today = today_appointments.filter(status='completed').count()
+        cancelled_appointments_today = today_appointments.filter(status='cancelled').count()
+        
+        this_week_appointments = Appointment.objects.filter(
+            appointment_date__gte=week_start,
+            appointment_date__lt=week_end
+        )
+        this_week_appointments_count = this_week_appointments.count()
+        
+        this_month_appointments = Appointment.objects.filter(
+            appointment_date__gte=month_start,
+            appointment_date__lt=month_end
+        )
+        this_month_appointments_count = this_month_appointments.count()
+        
+        # Patient Statistics
+        total_patients = User.objects.filter(role=User.UserRole.PATIENT).count()
+        new_patients_this_month = User.objects.filter(
+            role=User.UserRole.PATIENT,
+            created_at__gte=month_start
+        ).count()
+        
+        # Active patients (patients with appointments in last 90 days or upcoming)
+        active_date_threshold = now - timedelta(days=90)
+        active_patients = User.objects.filter(role=User.UserRole.PATIENT).filter(
+            Q(patient_appointments__appointment_date__gte=active_date_threshold) |
+            Q(patient_appointments__status__in=['scheduled', 'confirmed'])
+        ).distinct().count()
+        
+        # Staff Statistics
+        total_psychologists = User.objects.filter(role=User.UserRole.PSYCHOLOGIST).count()
+        total_practice_managers = User.objects.filter(role=User.UserRole.PRACTICE_MANAGER).count()
+        
+        # Financial Statistics (if billing is available)
+        today_revenue = 0.00
+        this_week_revenue = 0.00
+        this_month_revenue = 0.00
+        pending_invoices = 0
+        total_revenue = 0.00
+        
+        if BILLING_AVAILABLE and Invoice:
+            from django.db.models import Sum
+            from decimal import Decimal
+            
+            # Today's revenue
+            today_invoices = Invoice.objects.filter(
+                service_date=today,
+                status=Invoice.InvoiceStatus.PAID
+            )
+            today_revenue_sum = today_invoices.aggregate(total=Sum('total_amount'))['total']
+            today_revenue = float(today_revenue_sum) if today_revenue_sum else 0.00
+            
+            # This week's revenue
+            week_invoices = Invoice.objects.filter(
+                service_date__gte=week_start_date,
+                service_date__lt=week_end_date,
+                status=Invoice.InvoiceStatus.PAID
+            )
+            week_revenue_sum = week_invoices.aggregate(total=Sum('total_amount'))['total']
+            this_week_revenue = float(week_revenue_sum) if week_revenue_sum else 0.00
+            
+            # This month's revenue
+            month_invoices = Invoice.objects.filter(
+                service_date__gte=month_start_date,
+                service_date__lt=month_end_date,
+                status=Invoice.InvoiceStatus.PAID
+            )
+            month_revenue_sum = month_invoices.aggregate(total=Sum('total_amount'))['total']
+            this_month_revenue = float(month_revenue_sum) if month_revenue_sum else 0.00
+            
+            # Pending invoices
+            pending_invoices = Invoice.objects.filter(
+                status__in=[Invoice.InvoiceStatus.SENT, Invoice.InvoiceStatus.DRAFT]
+            ).count()
+            
+            # Total revenue
+            total_invoices = Invoice.objects.filter(status=Invoice.InvoiceStatus.PAID)
+            total_revenue_sum = total_invoices.aggregate(total=Sum('total_amount'))['total']
+            total_revenue = float(total_revenue_sum) if total_revenue_sum else 0.00
+        
+        # Recent Appointments (last 10)
+        recent_appointments_list = Appointment.objects.all().select_related(
+            'patient', 'psychologist', 'service'
+        ).order_by('-appointment_date')[:10]
+        
+        recent_appointments = [
+            {
+                'id': apt.id,
+                'patient_name': apt.patient.get_full_name(),
+                'psychologist_name': apt.psychologist.get_full_name(),
+                'service_name': apt.service.name if apt.service else 'N/A',
+                'appointment_date': apt.appointment_date.isoformat(),
+                'status': apt.status,
+                'session_type': apt.session_type
+            }
+            for apt in recent_appointments_list
+        ]
+        
+        # Upcoming Appointments (next 10)
+        upcoming_appointments_list = Appointment.objects.filter(
+            appointment_date__gte=now,
+            status__in=['scheduled', 'confirmed']
+        ).select_related('patient', 'psychologist', 'service').order_by('appointment_date')[:10]
+        
+        upcoming_appointments = [
+            {
+                'id': apt.id,
+                'patient_name': apt.patient.get_full_name(),
+                'psychologist_name': apt.psychologist.get_full_name(),
+                'service_name': apt.service.name if apt.service else 'N/A',
+                'appointment_date': apt.appointment_date.isoformat(),
+                'status': apt.status,
+                'session_type': apt.session_type
+            }
+            for apt in upcoming_appointments_list
+        ]
+        
+        # Top Psychologists (by appointment count)
+        top_psychologists = User.objects.filter(
+            role=User.UserRole.PSYCHOLOGIST
+        ).annotate(
+            appointment_count=Count('psychologist_appointments')
+        ).order_by('-appointment_count')[:5]
+        
+        top_psychologists_list = [
+            {
+                'id': psych.id,
+                'name': psych.get_full_name(),
+                'email': psych.email,
+                'appointment_count': psych.appointment_count
+            }
+            for psych in top_psychologists
+        ]
+        
+        # Recent Invoices (if billing available)
+        recent_invoices = []
+        if BILLING_AVAILABLE and Invoice:
+            recent_invoices_list = Invoice.objects.all().select_related(
+                'patient', 'appointment'
+            ).order_by('-created_at')[:10]
+            
+            recent_invoices = [
+                {
+                    'id': inv.id,
+                    'invoice_number': inv.invoice_number,
+                    'patient_name': inv.patient.get_full_name(),
+                    'total_amount': float(inv.total_amount),
+                    'status': inv.status,
+                    'service_date': inv.service_date.isoformat() if inv.service_date else None
+                }
+                for inv in recent_invoices_list
+            ]
+        
+        # Build comprehensive dashboard data
+        dashboard_data = {
+            'stats': {
+                'today_appointments': today_appointments_count,
+                'this_week_appointments': this_week_appointments_count,
+                'this_month_appointments': this_month_appointments_count,
+                'completed_sessions_today': completed_sessions_today,
+                'cancelled_appointments_today': cancelled_appointments_today,
+                'total_patients': total_patients,
+                'active_patients': active_patients,
+                'new_patients_this_month': new_patients_this_month,
+                'total_psychologists': total_psychologists,
+                'total_practice_managers': total_practice_managers,
+                'today_revenue': today_revenue,
+                'this_week_revenue': this_week_revenue,
+                'this_month_revenue': this_month_revenue,
+                'total_revenue': total_revenue,
+                'pending_invoices': pending_invoices
+            },
+            'recent_appointments': recent_appointments,
+            'upcoming_appointments': upcoming_appointments,
+            'top_psychologists': top_psychologists_list,
+            'recent_invoices': recent_invoices
+        }
+        
+        return Response(dashboard_data)
+
+
+class AdminDashboardView(APIView):
+    """Dashboard data for system administrators"""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """
+        Get comprehensive dashboard data for system administrators
+        
+        Returns system-wide statistics including:
+        - User statistics
+        - System health metrics
+        - Overall system activity
+        """
+        if not request.user.is_admin_user():
+            return Response(
+                {'error': 'Only administrators can access this dashboard'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        today = timezone.now().date()
+        now = timezone.now()
+        
+        # Calculate date ranges
+        from datetime import timedelta, datetime, time
+        month_start_date = today.replace(day=1)
+        if month_start_date.month == 12:
+            month_end_date = month_start_date.replace(year=month_start_date.year + 1, month=1)
+        else:
+            month_end_date = month_start_date.replace(month=month_start_date.month + 1)
+        month_start = timezone.make_aware(datetime.combine(month_start_date, time.min))
+        
+        # User Statistics
+        total_users = User.objects.count()
+        total_patients = User.objects.filter(role=User.UserRole.PATIENT).count()
+        total_psychologists = User.objects.filter(role=User.UserRole.PSYCHOLOGIST).count()
+        total_practice_managers = User.objects.filter(role=User.UserRole.PRACTICE_MANAGER).count()
+        total_admins = User.objects.filter(role=User.UserRole.ADMIN).count()
+        
+        # New users this month
+        new_users_this_month = User.objects.filter(created_at__gte=month_start).count()
+        new_patients_this_month = User.objects.filter(
+            role=User.UserRole.PATIENT,
+            created_at__gte=month_start
+        ).count()
+        new_psychologists_this_month = User.objects.filter(
+            role=User.UserRole.PSYCHOLOGIST,
+            created_at__gte=month_start
+        ).count()
+        
+        # Verified users
+        verified_users = User.objects.filter(is_verified=True).count()
+        unverified_users = User.objects.filter(is_verified=False).count()
+        
+        # Appointment Statistics
+        total_appointments = Appointment.objects.count()
+        completed_appointments = Appointment.objects.filter(status='completed').count()
+        scheduled_appointments = Appointment.objects.filter(status__in=['scheduled', 'confirmed']).count()
+        cancelled_appointments = Appointment.objects.filter(status='cancelled').count()
+        
+        # Progress Notes Statistics
+        total_progress_notes = ProgressNote.objects.count()
+        
+        # Financial Statistics (if billing available)
+        total_invoices = 0
+        total_revenue = 0.00
+        total_medicare_claims = 0
+        
+        if BILLING_AVAILABLE:
+            if Invoice:
+                from django.db.models import Sum
+                total_invoices = Invoice.objects.count()
+                total_revenue_sum = Invoice.objects.filter(
+                    status=Invoice.InvoiceStatus.PAID
+                ).aggregate(total=Sum('total_amount'))['total']
+                total_revenue = float(total_revenue_sum) if total_revenue_sum else 0.00
+            
+            if MedicareClaim:
+                total_medicare_claims = MedicareClaim.objects.count()
+        
+        # Recent Users (last 10)
+        recent_users_list = User.objects.all().order_by('-created_at')[:10]
+        recent_users = [
+            {
+                'id': user.id,
+                'name': user.get_full_name(),
+                'email': user.email,
+                'role': user.role,
+                'is_verified': user.is_verified,
+                'created_at': user.created_at.isoformat()
+            }
+            for user in recent_users_list
+        ]
+        
+        # System Health (basic metrics)
+        system_health = {
+            'status': 'good',
+            'total_users': total_users,
+            'total_appointments': total_appointments,
+            'active_patients': User.objects.filter(
+                role=User.UserRole.PATIENT,
+                patient_appointments__status__in=['scheduled', 'confirmed']
+            ).distinct().count(),
+            'verified_users_percentage': round((verified_users / total_users * 100), 2) if total_users > 0 else 0
+        }
+        
+        # Build comprehensive dashboard data
+        dashboard_data = {
+            'stats': {
+                'total_users': total_users,
+                'total_patients': total_patients,
+                'total_psychologists': total_psychologists,
+                'total_practice_managers': total_practice_managers,
+                'total_admins': total_admins,
+                'new_users_this_month': new_users_this_month,
+                'new_patients_this_month': new_patients_this_month,
+                'new_psychologists_this_month': new_psychologists_this_month,
+                'verified_users': verified_users,
+                'unverified_users': unverified_users,
+                'total_appointments': total_appointments,
+                'completed_appointments': completed_appointments,
+                'scheduled_appointments': scheduled_appointments,
+                'cancelled_appointments': cancelled_appointments,
+                'total_progress_notes': total_progress_notes,
+                'total_invoices': total_invoices,
+                'total_revenue': total_revenue,
+                'total_medicare_claims': total_medicare_claims
+            },
+            'system_health': system_health,
+            'recent_users': recent_users
+        }
+        
+        return Response(dashboard_data)
+
+
+class SystemSettingsView(APIView):
+    """System settings management for administrators"""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """
+        Get current system settings
+        
+        Returns clinic information and system configuration
+        """
+        if not request.user.is_admin_user():
+            return Response(
+                {'error': 'Only administrators can access system settings'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        from django.conf import settings
+        
+        # Get clinic information from settings or use defaults
+        settings_data = {
+            'clinic': {
+                'name': getattr(settings, 'CLINIC_NAME', 'Psychology Clinic'),
+                'address': getattr(settings, 'CLINIC_ADDRESS', ''),
+                'phone': getattr(settings, 'CLINIC_PHONE', ''),
+                'email': getattr(settings, 'CLINIC_EMAIL', ''),
+                'website': getattr(settings, 'CLINIC_WEBSITE', ''),
+                'abn': getattr(settings, 'CLINIC_ABN', ''),
+            },
+            'system': {
+                'timezone': str(settings.TIME_ZONE),
+                'language': settings.LANGUAGE_CODE,
+                'gst_rate': float(getattr(settings, 'GST_RATE', 0.10)),
+                'medicare_provider_number': getattr(settings, 'MEDICARE_PROVIDER_NUMBER', ''),
+                'ahpra_registration_number': getattr(settings, 'AHPRA_REGISTRATION_NUMBER', ''),
+            },
+            'notifications': {
+                'email_enabled': getattr(settings, 'EMAIL_NOTIFICATIONS_ENABLED', True),
+                'sms_enabled': getattr(settings, 'SMS_NOTIFICATIONS_ENABLED', False),
+                'whatsapp_enabled': getattr(settings, 'WHATSAPP_NOTIFICATIONS_ENABLED', False),
+            },
+            'billing': {
+                'default_payment_method': getattr(settings, 'DEFAULT_PAYMENT_METHOD', 'card'),
+                'invoice_terms_days': getattr(settings, 'INVOICE_TERMS_DAYS', 30),
+                'auto_generate_invoices': getattr(settings, 'AUTO_GENERATE_INVOICES', True),
+            }
+        }
+        
+        return Response(settings_data)
+    
+    def put(self, request):
+        """
+        Update system settings
+        
+        Note: This updates Django settings at runtime.
+        For production, consider using a Settings model or environment variables.
+        """
+        if not request.user.is_admin_user():
+            return Response(
+                {'error': 'Only administrators can update system settings'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # For now, return a message indicating settings should be updated via environment variables
+        # In production, you might want to create a Settings model to store these values
+        return Response(
+            {
+                'message': 'Settings update via API is not fully implemented. '
+                          'Please update settings via environment variables or Django settings file.',
+                'note': 'For production, consider implementing a Settings model to store these values in the database.'
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+class SystemAnalyticsView(APIView):
+    """System analytics and statistics for administrators"""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """
+        Get comprehensive system analytics
+        
+        Query Parameters:
+        - start_date: Start date for date range (YYYY-MM-DD)
+        - end_date: End date for date range (YYYY-MM-DD)
+        - period: Predefined period ('today', 'week', 'month', 'year', 'all')
+        """
+        if not request.user.is_admin_user():
+            return Response(
+                {'error': 'Only administrators can access system analytics'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        from datetime import timedelta, datetime, time
+        from django.db.models import Count, Sum, Avg, Q
+        
+        now = timezone.now()
+        today = now.date()
+        
+        # Get date range from query parameters
+        period = request.query_params.get('period', 'month')
+        start_date_param = request.query_params.get('start_date')
+        end_date_param = request.query_params.get('end_date')
+        
+        # Calculate date range
+        if start_date_param and end_date_param:
+            try:
+                start_date = datetime.strptime(start_date_param, '%Y-%m-%d').date()
+                end_date = datetime.strptime(end_date_param, '%Y-%m-%d').date()
+                start_datetime = timezone.make_aware(datetime.combine(start_date, time.min))
+                end_datetime = timezone.make_aware(datetime.combine(end_date, time.max))
+            except ValueError:
+                return Response(
+                    {'error': 'Invalid date format. Use YYYY-MM-DD'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        elif period == 'today':
+            start_datetime = timezone.make_aware(datetime.combine(today, time.min))
+            end_datetime = timezone.make_aware(datetime.combine(today, time.max))
+        elif period == 'week':
+            days_since_monday = today.weekday()
+            week_start_date = today - timedelta(days=days_since_monday)
+            start_datetime = timezone.make_aware(datetime.combine(week_start_date, time.min))
+            end_datetime = now
+        elif period == 'month':
+            month_start_date = today.replace(day=1)
+            start_datetime = timezone.make_aware(datetime.combine(month_start_date, time.min))
+            end_datetime = now
+        elif period == 'year':
+            year_start_date = today.replace(month=1, day=1)
+            start_datetime = timezone.make_aware(datetime.combine(year_start_date, time.min))
+            end_datetime = now
+        else:  # 'all'
+            start_datetime = None
+            end_datetime = None
+        
+        # User Analytics
+        user_filter = Q()
+        if start_datetime:
+            user_filter = Q(created_at__gte=start_datetime)
+            if end_datetime:
+                user_filter &= Q(created_at__lte=end_datetime)
+        
+        total_users = User.objects.filter(user_filter).count() if start_datetime else User.objects.count()
+        users_by_role = User.objects.filter(user_filter if start_datetime else Q()).values('role').annotate(
+            count=Count('id')
+        )
+        
+        # User growth over time (daily breakdown)
+        user_growth = []
+        if start_datetime and end_datetime:
+            current_date = start_datetime.date()
+            while current_date <= min(end_datetime.date(), today):
+                date_users = User.objects.filter(
+                    created_at__date=current_date
+                ).count()
+                user_growth.append({
+                    'date': current_date.isoformat(),
+                    'count': date_users
+                })
+                current_date += timedelta(days=1)
+        
+        # Appointment Analytics
+        appointment_filter = Q()
+        if start_datetime:
+            appointment_filter = Q(appointment_date__gte=start_datetime)
+            if end_datetime:
+                appointment_filter &= Q(appointment_date__lte=end_datetime)
+        
+        total_appointments = Appointment.objects.filter(appointment_filter).count() if start_datetime else Appointment.objects.count()
+        appointments_by_status = Appointment.objects.filter(
+            appointment_filter if start_datetime else Q()
+        ).values('status').annotate(count=Count('id'))
+        
+        appointments_by_type = Appointment.objects.filter(
+            appointment_filter if start_datetime else Q()
+        ).values('session_type').annotate(count=Count('id'))
+        
+        # Appointment trends (daily breakdown)
+        appointment_trends = []
+        if start_datetime and end_datetime:
+            current_date = start_datetime.date()
+            while current_date <= min(end_datetime.date(), today):
+                date_appointments = Appointment.objects.filter(
+                    appointment_date__date=current_date
+                ).count()
+                appointment_trends.append({
+                    'date': current_date.isoformat(),
+                    'count': date_appointments
+                })
+                current_date += timedelta(days=1)
+        
+        # Financial Analytics
+        financial_data = {
+            'total_revenue': 0.00,
+            'total_invoices': 0,
+            'paid_invoices': 0,
+            'pending_invoices': 0,
+            'total_medicare_claims': 0
+        }
+        
+        if BILLING_AVAILABLE:
+            invoice_filter = Q()
+            if start_datetime:
+                invoice_filter = Q(service_date__gte=start_datetime.date())
+                if end_datetime:
+                    invoice_filter &= Q(service_date__lte=end_datetime.date())
+            
+            if Invoice:
+                invoices = Invoice.objects.filter(invoice_filter if start_datetime else Q())
+                financial_data['total_invoices'] = invoices.count()
+                financial_data['paid_invoices'] = invoices.filter(status=Invoice.InvoiceStatus.PAID).count()
+                financial_data['pending_invoices'] = invoices.filter(
+                    status__in=[Invoice.InvoiceStatus.SENT, Invoice.InvoiceStatus.DRAFT]
+                ).count()
+                
+                revenue_sum = invoices.filter(status=Invoice.InvoiceStatus.PAID).aggregate(
+                    total=Sum('total_amount')
+                )['total']
+                financial_data['total_revenue'] = float(revenue_sum) if revenue_sum else 0.00
+            
+            if MedicareClaim:
+                claim_filter = Q()
+                if start_datetime:
+                    claim_filter = Q(claim_date__gte=start_datetime.date())
+                    if end_datetime:
+                        claim_filter &= Q(claim_date__lte=end_datetime.date())
+                financial_data['total_medicare_claims'] = MedicareClaim.objects.filter(
+                    claim_filter if start_datetime else Q()
+                ).count()
+        
+        # Progress Notes Analytics
+        notes_filter = Q()
+        if start_datetime:
+            notes_filter = Q(created_at__gte=start_datetime)
+            if end_datetime:
+                notes_filter &= Q(created_at__lte=end_datetime)
+        
+        total_progress_notes = ProgressNote.objects.filter(
+            notes_filter if start_datetime else Q()
+        ).count()
+        
+        # Average progress rating
+        avg_rating = ProgressNote.objects.filter(
+            notes_filter if start_datetime else Q(),
+            progress_rating__isnull=False
+        ).aggregate(avg=Avg('progress_rating'))['avg']
+        
+        # Performance Metrics
+        active_patients = User.objects.filter(
+            role=User.UserRole.PATIENT,
+            patient_appointments__status__in=['scheduled', 'confirmed']
+        ).distinct().count()
+        
+        verified_users = User.objects.filter(is_verified=True).count()
+        total_users_all = User.objects.count()
+        verification_rate = round((verified_users / total_users_all * 100), 2) if total_users_all > 0 else 0
+        
+        # Build analytics response
+        analytics_data = {
+            'period': {
+                'type': period,
+                'start_date': start_datetime.date().isoformat() if start_datetime else None,
+                'end_date': end_datetime.date().isoformat() if end_datetime else None
+            },
+            'users': {
+                'total': total_users,
+                'by_role': list(users_by_role),
+                'growth': user_growth,
+                'verified_count': verified_users,
+                'verification_rate': verification_rate
+            },
+            'appointments': {
+                'total': total_appointments,
+                'by_status': list(appointments_by_status),
+                'by_type': list(appointments_by_type),
+                'trends': appointment_trends
+            },
+            'financial': financial_data,
+            'progress_notes': {
+                'total': total_progress_notes,
+                'average_rating': round(float(avg_rating), 2) if avg_rating else None
+            },
+            'performance': {
+                'active_patients': active_patients,
+                'total_users': total_users_all,
+                'verification_rate': verification_rate
+            }
+        }
+        
+        return Response(analytics_data)
 
 
 class ProfileView(APIView):
@@ -596,34 +1348,86 @@ class PatientManagementView(APIView):
             # Get appointment statistics
             total_appointments = patient.patient_appointments.count()
             completed_appointments = patient.patient_appointments.filter(status='completed').count()
+            upcoming_appointments = patient.patient_appointments.filter(
+                appointment_date__gte=timezone.now(),
+                status__in=['scheduled', 'confirmed']
+            ).count()
             last_appointment = patient.patient_appointments.order_by('-appointment_date').first()
+            next_appointment = patient.patient_appointments.filter(
+                appointment_date__gte=timezone.now(),
+                status__in=['scheduled', 'confirmed']
+            ).order_by('appointment_date').first()
             
-            # Get progress notes count
-            progress_notes_count = patient.progress_notes.count()
+            # Get progress notes statistics
+            progress_notes = patient.progress_notes.all()
+            progress_notes_count = progress_notes.count()
+            
+            # Calculate average progress rating
+            progress_ratings = [note.progress_rating for note in progress_notes if note.progress_rating]
+            average_progress_rating = sum(progress_ratings) / len(progress_ratings) if progress_ratings else None
+            
+            # Get last progress rating
+            last_note = progress_notes.order_by('-session_date').first()
+            last_progress_rating = last_note.progress_rating if last_note and last_note.progress_rating else None
+            
+            # Determine patient status
+            patient_status = 'inactive'
+            if total_appointments > 0:
+                if last_appointment:
+                    days_since_last = (timezone.now().date() - last_appointment.appointment_date.date()).days
+                    if days_since_last <= 30:
+                        patient_status = 'active'
+                    elif completed_appointments > 0 and not upcoming_appointments:
+                        patient_status = 'completed'
+            
+            # Format date of birth
+            dob_str = patient.date_of_birth.strftime('%Y-%m-%d') if patient.date_of_birth else None
             
             patient_data.append({
-                'id': patient.id,
+                'id': patient.id,  # Numeric ID as required
                 'name': patient.get_full_name(),
                 'email': patient.email,
-                'phone_number': patient.phone_number,
-                'date_of_birth': patient.date_of_birth,
+                'phone': patient.phone_number or '',
+                'phone_number': patient.phone_number or '',  # Keep both for compatibility
+                'date_of_birth': dob_str,
+                'dateOfBirth': dob_str,  # Keep both formats
                 'age': patient.age,
+                'gender': patient.gender if hasattr(patient, 'gender') else (patient_profile.gender_identity if patient_profile else None),
+                'gender_identity': patient_profile.gender_identity if patient_profile else None,
                 'intake_completed': patient_profile.intake_completed if patient_profile else False,
-                'total_appointments': total_appointments,
-                'completed_appointments': completed_appointments,
+                'total_sessions': progress_notes_count,
+                'totalSessions': progress_notes_count,  # Keep both formats
+                'completed_sessions': completed_appointments,
+                'completedSessions': completed_appointments,  # Keep both formats
+                'upcoming_sessions': upcoming_appointments,
+                'upcomingSessions': upcoming_appointments,  # Keep both formats
                 'progress_notes_count': progress_notes_count,
-                'last_appointment': {
-                    'date': last_appointment.appointment_date if last_appointment else None,
-                    'status': last_appointment.status if last_appointment else None,
-                    'psychologist_name': last_appointment.psychologist.get_full_name() if last_appointment else None
-                } if last_appointment else None,
-                'created_at': patient.created_at,
+                'last_progress_rating': last_progress_rating,
+                'lastProgressRating': last_progress_rating,  # Keep both formats
+                'average_progress_rating': round(average_progress_rating, 1) if average_progress_rating else None,
+                'averageProgressRating': round(average_progress_rating, 1) if average_progress_rating else None,  # Keep both formats
+                'last_appointment': last_appointment.appointment_date.isoformat() if last_appointment else None,
+                'lastAppointment': last_appointment.appointment_date.isoformat() if last_appointment else None,  # Keep both formats
+                'last_session_date': last_note.session_date.isoformat() if last_note else None,
+                'lastSessionDate': last_note.session_date.isoformat() if last_note else None,  # Keep both formats
+                'next_appointment': next_appointment.appointment_date.isoformat() if next_appointment else None,
+                'nextAppointment': next_appointment.appointment_date.isoformat() if next_appointment else None,  # Keep both formats
+                'therapy_goals': patient_profile.therapy_goals if patient_profile else None,
+                'therapyFocus': patient_profile.therapy_goals if patient_profile else None,  # Keep both formats
+                'presenting_concerns': patient_profile.presenting_concerns if patient_profile else None,
+                'status': patient_status,
+                'registered_date': patient.created_at.date().isoformat() if patient.created_at else None,
+                'registeredDate': patient.created_at.date().isoformat() if patient.created_at else None,  # Keep both formats
+                'created_at': patient.created_at.isoformat() if patient.created_at else None,
                 'is_verified': patient.is_verified
             })
         
+        # Return in format expected by frontend (with both formats for compatibility)
         return Response({
-            'patients': patient_data,
-            'total_count': len(patient_data),
+            'count': len(patient_data),
+            'total_count': len(patient_data),  # Keep both
+            'results': patient_data,  # Frontend expects this
+            'patients': patient_data,  # Keep for backward compatibility
             'filters_applied': {
                 'search': search_query,
                 'status': status_filter,
