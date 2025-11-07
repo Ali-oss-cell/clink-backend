@@ -10,9 +10,13 @@ from rest_framework.response import Response  # type: ignore
 from rest_framework.views import APIView  # type: ignore
 from rest_framework.permissions import IsAuthenticated, AllowAny  # type: ignore
 from rest_framework_simplejwt.tokens import RefreshToken  # type: ignore
+from rest_framework.filters import SearchFilter, OrderingFilter  # type: ignore
+from rest_framework.pagination import PageNumberPagination  # type: ignore
+from django_filters.rest_framework import DjangoFilterBackend  # type: ignore
 from django.db.models import Q, Count  # type: ignore
 from django.db import models  # type: ignore
 from django.utils import timezone  # type: ignore
+from datetime import timedelta  # type: ignore
 
 from .models import PatientProfile, ProgressNote
 from appointments.models import Appointment
@@ -35,7 +39,7 @@ except ImportError:
     SERVICES_AVAILABLE = False
     PsychologistProfile = None
 from .serializers import (
-    UserSerializer, PatientRegistrationSerializer, PatientProfileSerializer,
+    UserSerializer, UserUpdateSerializer, PatientRegistrationSerializer, PatientProfileSerializer,
     IntakeFormSerializer, ProgressNoteSerializer, ProgressNoteCreateSerializer,
     PsychologistDashboardSerializer, PatientDashboardSerializer
 )
@@ -43,40 +47,335 @@ from .serializers import (
 User = get_user_model()
 
 
+class UserListPagination(PageNumberPagination):
+    """Custom pagination for user list endpoint"""
+    page_size = 100
+    page_size_query_param = 'page_size'
+    max_page_size = 1000
+
+
+class AdminCreateUserView(APIView):
+    """
+    Simple endpoint for admin to create users (practice manager or psychologist)
+    
+    POST /api/auth/admin/create-user/
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Create a new user (admin only)"""
+        # Check permissions
+        if not request.user.is_admin_user():
+            return Response(
+                {'error': 'Only administrators can create users'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Get data
+        email = request.data.get('email')
+        password = request.data.get('password')
+        full_name = request.data.get('full_name') or request.data.get('name')
+        role = request.data.get('role')
+        phone_number = request.data.get('phone_number', '')
+        
+        # Validate required fields
+        if not email or not password or not full_name or not role:
+            return Response(
+                {'error': 'Missing required fields: email, password, full_name, role'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate role
+        valid_roles = ['practice_manager', 'psychologist', 'admin']
+        if role not in valid_roles:
+            return Response(
+                {'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # If psychologist, validate AHPRA fields
+        if role == 'psychologist':
+            ahpra_registration_number = request.data.get('ahpra_registration_number')
+            ahpra_expiry_date = request.data.get('ahpra_expiry_date')
+            
+            if not ahpra_registration_number:
+                return Response(
+                    {'error': 'AHPRA registration number is required for psychologists'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            if not ahpra_expiry_date:
+                return Response(
+                    {'error': 'AHPRA expiry date is required for psychologists'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Split full_name into first_name and last_name
+        name_parts = full_name.strip().split(' ', 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ''
+        
+        # Generate username from email
+        username = email.split('@')[0]
+        
+        # Check if user already exists
+        if User.objects.filter(email=email).exists():
+            return Response(
+                {'error': 'User with this email already exists'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create user
+        try:
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                first_name=first_name,
+                last_name=last_name,
+                phone_number=phone_number,
+                role=role,
+                is_verified=True,
+                is_active=True
+            )
+            
+            # Create psychologist profile if role is psychologist
+            if role == 'psychologist':
+                from services.models import PsychologistProfile
+                from datetime import datetime
+                
+                # Parse AHPRA expiry date
+                try:
+                    if isinstance(ahpra_expiry_date, str):
+                        expiry_date = datetime.strptime(ahpra_expiry_date, '%Y-%m-%d').date()
+                    else:
+                        expiry_date = ahpra_expiry_date
+                except (ValueError, TypeError):
+                    return Response(
+                        {'error': 'Invalid AHPRA expiry date format. Use YYYY-MM-DD'}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Check if AHPRA number already exists
+                if PsychologistProfile.objects.filter(ahpra_registration_number=ahpra_registration_number).exists():
+                    return Response(
+                        {'error': 'AHPRA registration number already exists'}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Get optional psychologist fields
+                title = request.data.get('title', 'Dr')
+                qualifications = request.data.get('qualifications', '')
+                years_experience = request.data.get('years_experience', 0)
+                consultation_fee = request.data.get('consultation_fee', 180.00)
+                medicare_provider_number = request.data.get('medicare_provider_number', '')
+                bio = request.data.get('bio', '')
+                is_accepting_new_patients = request.data.get('is_accepting_new_patients', True)
+                
+                # Create psychologist profile with all details
+                psychologist_profile = PsychologistProfile.objects.create(
+                    user=user,
+                    ahpra_registration_number=ahpra_registration_number,
+                    ahpra_expiry_date=expiry_date,
+                    title=title,
+                    qualifications=qualifications,
+                    years_experience=years_experience,
+                    consultation_fee=consultation_fee,
+                    medicare_provider_number=medicare_provider_number,
+                    bio=bio,
+                    is_accepting_new_patients=is_accepting_new_patients
+                )
+                
+                # Handle specializations if provided
+                specializations = request.data.get('specializations', [])
+                if specializations:
+                    psychologist_profile.specializations.set(specializations)
+                
+                # Handle services if provided
+                services = request.data.get('services_offered', [])
+                if services:
+                    psychologist_profile.services_offered.set(services)
+            
+            return Response(
+                {
+                    'message': f'{role.replace("_", " ").title()} created successfully',
+                    'user': UserSerializer(user).data
+                }, 
+                status=status.HTTP_201_CREATED
+            )
+            
+        except Exception as e:
+            return Response(
+                {'error': f'Error creating user: {str(e)}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
 class UserViewSet(viewsets.ModelViewSet):
     """
-    User management viewset with role-based filtering
+    User management viewset with role-based filtering, search, and pagination
     
     Provides different access levels based on user role:
     - Admins/Practice Managers: Can see all users
     - Psychologists: Can see their patients and themselves
     - Patients: Can only see themselves
+    
+    Query Parameters:
+    - role: Filter by role (admin, psychologist, practice_manager, patient)
+    - search: Search by name or email
+    - is_verified: Filter by verification status (true/false)
+    - is_active: Filter by active status (true/false)
+    - page: Page number for pagination
+    - page_size: Items per page (default: 100)
     """
     
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = UserListPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['role', 'is_verified', 'is_active']
+    search_fields = ['first_name', 'last_name', 'email', 'username']
+    ordering_fields = ['created_at', 'last_login', 'email', 'first_name', 'last_name']
+    ordering = ['-created_at']  # Default ordering
     
     def get_queryset(self):
         """
-        Filter users based on role and permissions
+        Filter users based on role and permissions, then apply query filters
         
         Returns:
-            QuerySet: Filtered users based on current user's role
+            QuerySet: Filtered users based on current user's role and query parameters
         """
         user = self.request.user
+        queryset = User.objects.all()
         
+        # Apply role-based access control
         if user.is_admin_user() or user.is_practice_manager():
             # Admin and practice managers can see all users
-            return User.objects.all()
+            queryset = User.objects.all()
         elif user.is_psychologist():
             # Psychologists can see their patients and themselves
-            return User.objects.filter(
+            queryset = User.objects.filter(
                 Q(role=User.UserRole.PATIENT) | Q(id=user.id)
             )
         else:
             # Patients can only see themselves
-            return User.objects.filter(id=user.id)
+            queryset = User.objects.filter(id=user.id)
+        
+        # Apply additional filters from query parameters
+        # These are handled by DjangoFilterBackend, but we can add custom logic here if needed
+        return queryset
+    
+    def get_serializer_class(self):
+        """Return appropriate serializer based on action"""
+        if self.action in ['update', 'partial_update']:
+            return UserUpdateSerializer
+        return UserSerializer
+    
+    def retrieve(self, request, *args, **kwargs):
+        """Get single user with psychologist profile if applicable"""
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+    
+    def update(self, request, *args, **kwargs):
+        """Update user (PUT) - full update"""
+        return self._update_user(request, *args, **kwargs)
+    
+    def partial_update(self, request, *args, **kwargs):
+        """Update user (PATCH) - partial update"""
+        return self._update_user(request, partial=True, *args, **kwargs)
+    
+    def _update_user(self, request, partial=False, *args, **kwargs):
+        """Internal method to handle user updates with permission checks"""
+        instance = self.get_object()
+        user = request.user
+        
+        # Permission checks
+        if not (user.is_admin_user() or user.is_practice_manager()):
+            return Response(
+                {'error': 'You do not have permission to update users'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Practice managers cannot update admins
+        if user.is_practice_manager() and instance.is_admin_user():
+            return Response(
+                {'error': 'Practice managers cannot update administrators'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Practice managers cannot change roles
+        if user.is_practice_manager() and 'role' in request.data:
+            return Response(
+                {'error': 'Practice managers cannot change user roles'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Admins cannot change another user to admin
+        if user.is_admin_user() and request.data.get('role') == 'admin' and instance.id != user.id:
+            return Response(
+                {'error': 'Cannot change another user to admin role'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        # Return updated user with full serializer
+        updated_instance = User.objects.get(pk=instance.pk)
+        response_serializer = UserSerializer(updated_instance)
+        return Response(response_serializer.data)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete user (admin only) with safety checks"""
+        instance = self.get_object()
+        user = request.user
+        
+        # Only admins can delete users
+        if not user.is_admin_user():
+            return Response(
+                {'error': 'Only administrators can delete users'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Safety checks
+        errors = []
+        
+        # Check for active appointments
+        if SERVICES_AVAILABLE:
+            active_appointments = Appointment.objects.filter(
+                Q(patient=instance) | Q(psychologist=instance),
+                status__in=['scheduled', 'confirmed']
+            ).exists()
+            if active_appointments:
+                errors.append("User has active appointments")
+        
+        # Check for unpaid invoices
+        if BILLING_AVAILABLE and Invoice:
+            unpaid_invoices = Invoice.objects.filter(
+                patient=instance,
+                status__in=['pending', 'overdue']
+            ).exists()
+            if unpaid_invoices:
+                errors.append("User has unpaid invoices")
+        
+        # Check if this is the only admin
+        if instance.is_admin_user():
+            admin_count = User.objects.filter(role=User.UserRole.ADMIN, is_active=True).count()
+            if admin_count <= 1:
+                errors.append("Cannot delete the only active administrator")
+        
+        if errors:
+            return Response(
+                {'error': 'Cannot delete user. ' + ' '.join(errors)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Delete the user
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CustomLoginView(APIView):
@@ -1383,10 +1682,19 @@ class PatientManagementView(APIView):
             # Format date of birth
             dob_str = patient.date_of_birth.strftime('%Y-%m-%d') if patient.date_of_birth else None
             
+            # Get full name with fallback
+            full_name = patient.get_full_name() or f"{patient.first_name or ''} {patient.last_name or ''}".strip() or 'N/A'
+            
             patient_data.append({
                 'id': patient.id,  # Numeric ID as required
-                'name': patient.get_full_name(),
-                'email': patient.email,
+                'name': full_name,
+                'fullName': full_name,  # Alias for frontend compatibility
+                'firstName': patient.first_name or '',
+                'first_name': patient.first_name or '',  # Keep both formats
+                'lastName': patient.last_name or '',
+                'last_name': patient.last_name or '',  # Keep both formats
+                'email': patient.email or '',
+                'emailAddress': patient.email or '',  # Alias for frontend compatibility
                 'phone': patient.phone_number or '',
                 'phone_number': patient.phone_number or '',  # Keep both for compatibility
                 'date_of_birth': dob_str,

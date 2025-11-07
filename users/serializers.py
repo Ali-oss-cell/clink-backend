@@ -5,28 +5,237 @@ Supports intake forms, progress notes, and role-based data access
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from .models import PatientProfile, ProgressNote
 
 User = get_user_model()
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Basic user serializer for authentication responses"""
+    """Basic user serializer for authentication responses and user management"""
     
-    full_name = serializers.CharField(source='get_full_name', read_only=True)
+    full_name = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
+    psychologist_profile = serializers.SerializerMethodField()
     
     class Meta:
         model = User
         fields = [
             'id', 'email', 'username', 'first_name', 'last_name', 'full_name',
             'role', 'phone_number', 'date_of_birth', 'age', 'is_verified',
-            'created_at'
+            'is_active', 'created_at', 'last_login', 'psychologist_profile'
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'last_login']
+    
+    def get_full_name(self, obj):
+        """Get full name from first_name and last_name"""
+        return obj.get_full_name() or f"{obj.first_name} {obj.last_name}".strip() or obj.email
     
     def get_age(self, obj):
         return obj.age if hasattr(obj, 'age') else None
+    
+    def get_psychologist_profile(self, obj):
+        """Get psychologist profile if user is a psychologist"""
+        if obj.role == User.UserRole.PSYCHOLOGIST and hasattr(obj, 'psychologist_profile'):
+            try:
+                from services.serializers import PsychologistProfileSerializer
+                return PsychologistProfileSerializer(obj.psychologist_profile).data
+            except:
+                return None
+        return None
+
+
+class UserCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating users (admin/practice manager)"""
+    
+    password = serializers.CharField(write_only=True, min_length=8, required=True)
+    full_name = serializers.CharField(write_only=True, required=False, help_text="Alternative to first_name/last_name")
+    
+    class Meta:
+        model = User
+        fields = [
+            'email', 'password', 'username', 'first_name', 'last_name', 'full_name',
+            'role', 'phone_number', 'date_of_birth', 'is_verified', 'is_active'
+        ]
+        extra_kwargs = {
+            'username': {'required': False},
+            'first_name': {'required': False},
+            'last_name': {'required': False},
+        }
+    
+    def validate(self, attrs):
+        # Handle full_name if provided
+        if 'full_name' in attrs and attrs['full_name']:
+            name_parts = attrs['full_name'].strip().split(' ', 1)
+            if len(name_parts) == 2:
+                attrs['first_name'] = name_parts[0]
+                attrs['last_name'] = name_parts[1]
+            else:
+                attrs['first_name'] = name_parts[0]
+                attrs['last_name'] = ''
+            del attrs['full_name']
+        
+        # Validate required fields based on role
+        role = attrs.get('role')
+        if not attrs.get('first_name') or not attrs.get('last_name'):
+            raise serializers.ValidationError({
+                'first_name': 'First name is required',
+                'last_name': 'Last name is required'
+            })
+        
+        # Generate username from email if not provided
+        if not attrs.get('username'):
+            email = attrs.get('email', '')
+            attrs['username'] = email.split('@')[0] if email else f"user_{User.objects.count() + 1}"
+        
+        return attrs
+    
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        role = validated_data.get('role', User.UserRole.PATIENT)
+        
+        # Create user
+        user = User.objects.create_user(
+            password=password,
+            **validated_data
+        )
+        
+        # Create profile based on role
+        if role == User.UserRole.PATIENT:
+            from .models import PatientProfile
+            PatientProfile.objects.create(user=user)
+        elif role == User.UserRole.PSYCHOLOGIST:
+            # Note: Psychologist profile should be created separately via psychologist profile endpoint
+            # as it requires AHPRA registration number and other professional details
+            pass
+        
+        return user
+
+
+class UserUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating users with psychologist profile support"""
+    
+    full_name = serializers.CharField(write_only=True, required=False)
+    
+    # Psychologist profile fields
+    ahpra_registration_number = serializers.CharField(required=False, allow_blank=True)
+    ahpra_expiry_date = serializers.DateField(required=False, allow_null=True)
+    title = serializers.CharField(required=False, allow_blank=True)
+    qualifications = serializers.CharField(required=False, allow_blank=True)
+    years_experience = serializers.IntegerField(required=False, allow_null=True)
+    consultation_fee = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True)
+    medicare_provider_number = serializers.CharField(required=False, allow_blank=True)
+    bio = serializers.CharField(required=False, allow_blank=True)
+    is_accepting_new_patients = serializers.BooleanField(required=False, allow_null=True)
+    specializations = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True
+    )
+    services_offered = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True
+    )
+    
+    class Meta:
+        model = User
+        fields = [
+            'email', 'first_name', 'last_name', 'full_name', 'phone_number',
+            'role', 'is_verified', 'is_active', 'date_of_birth',
+            # Psychologist profile fields
+            'ahpra_registration_number', 'ahpra_expiry_date', 'title',
+            'qualifications', 'years_experience', 'consultation_fee',
+            'medicare_provider_number', 'bio', 'is_accepting_new_patients',
+            'specializations', 'services_offered'
+        ]
+    
+    def validate(self, attrs):
+        """Handle full_name and validate data"""
+        # Handle full_name if provided
+        if 'full_name' in attrs and attrs['full_name']:
+            name_parts = attrs['full_name'].strip().split(' ', 1)
+            if len(name_parts) == 2:
+                attrs['first_name'] = name_parts[0]
+                attrs['last_name'] = name_parts[1]
+            else:
+                attrs['first_name'] = name_parts[0]
+                attrs['last_name'] = ''
+            del attrs['full_name']
+        
+        return attrs
+    
+    def update(self, instance, validated_data):
+        """Update user and psychologist profile if applicable"""
+        # Extract psychologist profile fields
+        psychologist_fields = {
+            'ahpra_registration_number', 'ahpra_expiry_date', 'title',
+            'qualifications', 'years_experience', 'consultation_fee',
+            'medicare_provider_number', 'bio', 'is_accepting_new_patients',
+            'specializations', 'services_offered'
+        }
+        
+        profile_data = {}
+        specializations = None
+        services_offered = None
+        
+        for field in psychologist_fields:
+            if field in validated_data:
+                if field == 'specializations':
+                    specializations = validated_data.pop(field)
+                elif field == 'services_offered':
+                    services_offered = validated_data.pop(field)
+                else:
+                    profile_data[field] = validated_data.pop(field)
+        
+        # Update user fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Update psychologist profile if user is a psychologist
+        if instance.role == User.UserRole.PSYCHOLOGIST and (profile_data or specializations is not None or services_offered is not None):
+            try:
+                from services.models import PsychologistProfile
+                
+                # Get or create profile
+                try:
+                    profile = PsychologistProfile.objects.get(user=instance)
+                except PsychologistProfile.DoesNotExist:
+                    # Create profile with defaults if it doesn't exist
+                    defaults = {}
+                    if 'ahpra_registration_number' in profile_data:
+                        defaults['ahpra_registration_number'] = profile_data['ahpra_registration_number']
+                    if 'ahpra_expiry_date' in profile_data:
+                        defaults['ahpra_expiry_date'] = profile_data['ahpra_expiry_date']
+                    else:
+                        defaults['ahpra_expiry_date'] = timezone.now().date()
+                    
+                    profile = PsychologistProfile.objects.create(user=instance, **defaults)
+                    # Remove from profile_data since we already set them
+                    profile_data.pop('ahpra_registration_number', None)
+                    profile_data.pop('ahpra_expiry_date', None)
+                
+                # Update profile fields
+                for attr, value in profile_data.items():
+                    setattr(profile, attr, value)
+                
+                if profile_data:
+                    profile.save()
+                
+                # Update many-to-many relationships
+                if specializations is not None:
+                    profile.specializations.set(specializations)
+                if services_offered is not None:
+                    profile.services_offered.set(services_offered)
+                    
+            except Exception as e:
+                # If profile update fails, log but don't fail the user update
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error updating psychologist profile: {str(e)}")
+        
+        return instance
 
 
 class PatientRegistrationSerializer(serializers.ModelSerializer):

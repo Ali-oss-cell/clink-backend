@@ -32,13 +32,23 @@ class ServiceViewSet(viewsets.ModelViewSet):
     
     queryset = Service.objects.filter(is_active=True)
     serializer_class = ServiceSerializer
-    permission_classes = [IsAuthenticated]
+    
+    def get_permissions(self):
+        """
+        Allow public read access, require auth for modifications
+        """
+        if self.action in ['list', 'retrieve']:
+            # Public can view services for booking
+            return [permissions.AllowAny()]
+        else:
+            # Only authenticated users can modify
+            return [IsAuthenticated()]
     
     def get_queryset(self):
         """Filter services based on user permissions"""
         user = self.request.user
         
-        if user.is_admin_user() or user.is_practice_manager():
+        if user.is_authenticated and (user.is_admin_user() or user.is_practice_manager()):
             # Admin and practice managers can see all services
             return Service.objects.all()
         else:
@@ -58,13 +68,23 @@ class SpecializationViewSet(viewsets.ModelViewSet):
     
     queryset = Specialization.objects.filter(is_active=True)
     serializer_class = SpecializationSerializer
-    permission_classes = [IsAuthenticated]
+    
+    def get_permissions(self):
+        """
+        Allow public read access, require auth for modifications
+        """
+        if self.action in ['list', 'retrieve']:
+            # Public can view specializations
+            return [permissions.AllowAny()]
+        else:
+            # Only authenticated users can modify
+            return [IsAuthenticated()]
     
     def get_queryset(self):
         """Filter specializations based on user permissions"""
         user = self.request.user
         
-        if user.is_admin_user() or user.is_practice_manager():
+        if user.is_authenticated and (user.is_admin_user() or user.is_practice_manager()):
             # Admin and practice managers can see all specializations
             return Specialization.objects.all()
         else:

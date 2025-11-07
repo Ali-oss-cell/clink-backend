@@ -11,9 +11,13 @@ from rest_framework_simplejwt.views import (
 )
 from . import views
 
-router = DefaultRouter()
-router.register(r'users', views.UserViewSet, basename='user')
-router.register(r'progress-notes', views.ProgressNoteViewSet, basename='progress-note')
+# Router for auth endpoints (includes progress notes)
+auth_router = DefaultRouter()
+auth_router.register(r'progress-notes', views.ProgressNoteViewSet, basename='progress-note')
+
+# Router for user management endpoints
+users_router = DefaultRouter()
+users_router.register(r'', views.UserViewSet, basename='user')  # Empty string for /api/users/
 
 urlpatterns = [
     # JWT Authentication
@@ -42,12 +46,19 @@ urlpatterns = [
     # Admin System Management
     path('admin/settings/', views.SystemSettingsView.as_view(), name='admin-settings'),
     path('admin/analytics/', views.SystemAnalyticsView.as_view(), name='admin-analytics'),
+    path('admin/create-user/', views.AdminCreateUserView.as_view(), name='admin-create-user'),
     
     # Enhanced Patient Management
     path('patients/', views.PatientManagementView.as_view(), name='patient-management'),
     path('patients/<int:patient_id>/', views.PatientDetailView.as_view(), name='patient-detail'),
     path('patients/<int:patient_id>/progress/', views.PatientProgressView.as_view(), name='patient-progress'),
     
-    # ViewSets
-    path('', include(router.urls)),
+    # ViewSets for auth endpoints
+    path('', include(auth_router.urls)),
+]
+
+# Separate URL patterns for /api/users/ endpoint
+users_urlpatterns = [
+    # User ViewSet at root
+    path('', include(users_router.urls)),
 ]
