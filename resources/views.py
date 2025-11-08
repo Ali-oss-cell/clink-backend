@@ -2,7 +2,7 @@
 Resources app views - Mental health resources and educational materials
 """
 
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions     
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -30,8 +30,11 @@ class ResourceViewSet(viewsets.ModelViewSet):
     ViewSet for managing mental health resources
     
     Endpoints:
-    - GET /api/resources/ - List all resources with filters
-    - GET /api/resources/{id}/ - Get single resource
+    - GET /api/resources/ - List all resources with filters (public)
+    - GET /api/resources/{id}/ - Get single resource (public)
+    - POST /api/resources/ - Create new resource (staff only)
+    - PUT/PATCH /api/resources/{id}/ - Update resource (staff only)
+    - DELETE /api/resources/{id}/ - Delete resource (staff only)
     - POST /api/resources/{id}/bookmark/ - Bookmark resource
     - POST /api/resources/{id}/track-view/ - Track resource view
     - POST /api/resources/{id}/progress/ - Update progress
@@ -43,18 +46,42 @@ class ResourceViewSet(viewsets.ModelViewSet):
     """
     
     queryset = Resource.objects.filter(is_published=True)
-    permission_classes = [AllowAny]
     pagination_class = ResourcePagination
+    
+    def get_permissions(self):
+        """
+        Allow public read access, require authentication for modifications
+        Only staff (admin, practice manager, psychologist) can create/update/delete
+        """
+        if self.action in ['list', 'retrieve', 'categories', 'search']:
+            # Public can view resources
+            return [permissions.AllowAny()]
+        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
+            # Only authenticated staff can modify resources
+            return [IsAuthenticated()]
+        else:
+            # Other actions (bookmark, rate, etc.) require authentication
+            return [IsAuthenticated()]
     
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
         if self.action == 'retrieve':
             return ResourceDetailSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            # Use detail serializer for create/update to include all fields
+            return ResourceDetailSerializer
         return ResourceListSerializer
     
     def get_queryset(self):
-        """Filter resources based on query parameters"""
-        queryset = Resource.objects.filter(is_published=True)
+        """Filter resources based on query parameters and user permissions"""
+        user = self.request.user
+        
+        # Staff can see all resources (including unpublished)
+        if user.is_authenticated and (user.is_admin_user() or user.is_practice_manager() or user.is_psychologist()):
+            queryset = Resource.objects.all()
+        else:
+            # Public can only see published resources
+            queryset = Resource.objects.filter(is_published=True)
         
         # Filter by category
         category = self.request.query_params.get('category')
@@ -79,6 +106,27 @@ class ResourceViewSet(viewsets.ModelViewSet):
             )
         
         return queryset.order_by('-created_at')
+    
+    def perform_create(self, serializer):
+        """Create resource - only staff can create"""
+        user = self.request.user
+        if not (user.is_admin_user() or user.is_practice_manager() or user.is_psychologist()):
+            raise permissions.PermissionDenied("Only staff members can create resources")
+        serializer.save()
+    
+    def perform_update(self, serializer):
+        """Update resource - only staff can update"""
+        user = self.request.user
+        if not (user.is_admin_user() or user.is_practice_manager() or user.is_psychologist()):
+            raise permissions.PermissionDenied("Only staff members can update resources")
+        serializer.save()
+    
+    def perform_destroy(self, instance):
+        """Delete resource - only staff can delete"""
+        user = self.request.user
+        if not (user.is_admin_user() or user.is_practice_manager() or user.is_psychologist()):
+            raise permissions.PermissionDenied("Only staff members can delete resources")
+        instance.delete()
     
     def retrieve(self, request, *args, **kwargs):
         """Get single resource with detailed information"""

@@ -10,6 +10,7 @@ from rest_framework_simplejwt.views import (
     TokenVerifyView,
 )
 from . import views
+from appointments import booking_views
 
 # Router for auth endpoints (includes progress notes)
 auth_router = DefaultRouter()
@@ -52,6 +53,12 @@ urlpatterns = [
     path('patients/', views.PatientManagementView.as_view(), name='patient-management'),
     path('patients/<int:patient_id>/', views.PatientDetailView.as_view(), name='patient-detail'),
     path('patients/<int:patient_id>/progress/', views.PatientProgressView.as_view(), name='patient-progress'),
+    
+    # Appointments endpoints (alias for frontend compatibility)
+    path('appointments/available-slots/', booking_views.PsychologistAvailableTimeSlotsView.as_view(), name='auth-available-time-slots'),
+    path('appointments/calendar-view/', booking_views.CalendarAvailabilityView.as_view(), name='auth-calendar-availability'),
+    path('appointments/book-enhanced/', booking_views.BookAppointmentEnhancedView.as_view(), name='auth-book-appointment-enhanced'),
+    path('appointments/booking-summary/', booking_views.AppointmentBookingSummaryView.as_view(), name='auth-booking-summary'),
     
     # ViewSets for auth endpoints
     path('', include(auth_router.urls)),

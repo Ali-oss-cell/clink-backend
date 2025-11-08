@@ -36,7 +36,7 @@ class RelatedResourceSerializer(serializers.ModelSerializer):
 
 
 class ResourceDetailSerializer(serializers.ModelSerializer):
-    """Serializer for detailed resource view"""
+    """Serializer for detailed resource view and creation/update"""
     
     is_bookmarked = serializers.SerializerMethodField()
     user_progress = serializers.SerializerMethodField()
@@ -53,7 +53,12 @@ class ResourceDetailSerializer(serializers.ModelSerializer):
             'media_url', 'download_url', 'author', 'reviewer', 'last_reviewed_date',
             'tags', 'view_count', 'average_rating', 'total_ratings', 'is_bookmarked',
             'user_progress', 'estimated_reading_time', 'references', 'related_resources',
-            'thumbnail_url', 'created_at', 'updated_at'
+            'thumbnail_url', 'is_published', 'is_featured', 'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'view_count', 'average_rating', 'total_ratings', 'is_bookmarked',
+            'user_progress', 'estimated_reading_time', 'related_resources',
+            'created_at', 'updated_at'
         ]
     
     def get_is_bookmarked(self, obj):
