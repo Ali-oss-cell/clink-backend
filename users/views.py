@@ -20,6 +20,7 @@ from datetime import timedelta  # type: ignore
 
 from .models import PatientProfile, ProgressNote
 from appointments.models import Appointment
+from audit.utils import log_action
 
 # Import billing models for financial calculations
 try:
@@ -196,6 +197,15 @@ class AdminCreateUserView(APIView):
                 if services:
                     psychologist_profile.services_offered.set(services)
             
+            # Log user creation
+            log_action(
+                user=request.user,
+                action='create',
+                obj=user,
+                request=request,
+                metadata={'created_role': role}
+            )
+            
             return Response(
                 {
                     'message': f'{role.replace("_", " ").title()} created successfully',
@@ -319,12 +329,47 @@ class UserViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Store old values for audit log
+        old_data = {
+            'email': instance.email,
+            'role': instance.role,
+            'is_active': instance.is_active,
+            'is_verified': instance.is_verified,
+        }
+        
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         
-        # Return updated user with full serializer
+        # Get new values for audit log
         updated_instance = User.objects.get(pk=instance.pk)
+        new_data = {
+            'email': updated_instance.email,
+            'role': updated_instance.role,
+            'is_active': updated_instance.is_active,
+            'is_verified': updated_instance.is_verified,
+        }
+        
+        # Calculate changes for audit log
+        changes = {}
+        for key in old_data:
+            if old_data[key] != new_data[key]:
+                changes[key] = {
+                    'old': old_data[key],
+                    'new': new_data[key]
+                }
+        
+        # Log the update action
+        if changes:
+            log_action(
+                user=request.user,
+                action='update',
+                obj=updated_instance,
+                changes=changes,
+                request=request
+            )
+        
+        # Return updated user with full serializer
         response_serializer = UserSerializer(updated_instance)
         return Response(response_serializer.data)
     
@@ -372,6 +417,15 @@ class UserViewSet(viewsets.ModelViewSet):
                 {'error': 'Cannot delete user. ' + ' '.join(errors)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+        # Log the deletion before deleting
+        log_action(
+            user=request.user,
+            action='delete',
+            obj=instance,
+            request=request,
+            metadata={'deleted_user_email': instance.email}
+        )
         
         # Delete the user
         self.perform_destroy(instance)
@@ -423,6 +477,14 @@ class CustomLoginView(APIView):
         
         # Generate JWT tokens for authenticated user
         refresh = RefreshToken.for_user(user)
+        
+        # Log successful login
+        log_action(
+            user=user,
+            action='login',
+            request=request,
+            metadata={'login_method': 'email_password'}
+        )
         
         return Response({
             'access': str(refresh.access_token),

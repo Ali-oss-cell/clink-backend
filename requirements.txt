@@ -51,6 +51,9 @@ djangorestframework-filters==1.0.0.dev2
 python-dateutil==2.8.2
 pytz==2023.3
 
+# PDF Generation
+reportlab==4.0.7
+
 # Video Call Integration (Twilio Video)
 # Twilio SDK already included above for video calls
 

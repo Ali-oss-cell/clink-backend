@@ -8,20 +8,30 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.pagination import PageNumberPagination
 from django.utils import timezone
 from django.db.models import Q, Count
 from django.contrib.auth import get_user_model
+from datetime import datetime
 
 from .models import Appointment, AvailabilitySlot, TimeSlot
 from .serializers import (
-    AppointmentSerializer, AppointmentCreateSerializer, AvailabilitySlotSerializer,
+    AppointmentSerializer, AppointmentListSerializer, AppointmentCreateSerializer, AvailabilitySlotSerializer,
     TimeSlotSerializer, BookAppointmentSerializer, AppointmentStatusSerializer,
     PsychologistAvailabilitySerializer, AppointmentSummarySerializer,
     PatientAppointmentDetailSerializer, PsychologistScheduleSerializer
 )
 from services.models import Service
+from audit.utils import log_action
 
 User = get_user_model()
+
+
+class AppointmentPagination(PageNumberPagination):
+    """Custom pagination for appointments list"""
+    page_size = 100
+    page_size_query_param = 'page_size'
+    max_page_size = 1000
 
 
 class AppointmentViewSet(viewsets.ModelViewSet):
@@ -35,28 +45,71 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     """
     
     permission_classes = [IsAuthenticated]
+    pagination_class = AppointmentPagination
     
     def get_queryset(self):
         """
         Filter appointments based on user role and permissions
+        Supports query parameters: status, psychologist, patient, date_from, date_to
         
         Returns:
-            QuerySet: Filtered appointments based on user's role
+            QuerySet: Filtered appointments based on user's role and query parameters
         """
         user = self.request.user
         
+        # Base queryset based on role
         if user.is_admin_user() or user.is_practice_manager():
             # Admin and practice managers can see all appointments
-            return Appointment.objects.all()
+            queryset = Appointment.objects.select_related('patient', 'psychologist', 'service').all()
         elif user.is_psychologist():
             # Psychologists can only see their own appointments
-            return Appointment.objects.filter(psychologist=user)
+            queryset = Appointment.objects.select_related('patient', 'psychologist', 'service').filter(psychologist=user)
         else:
             # Patients can only see their own appointments
-            return Appointment.objects.filter(patient=user)
+            queryset = Appointment.objects.select_related('patient', 'psychologist', 'service').filter(patient=user)
+        
+        # Apply query parameter filters
+        # Filter by status
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        # Filter by psychologist ID
+        psychologist_id = self.request.query_params.get('psychologist')
+        if psychologist_id:
+            queryset = queryset.filter(psychologist_id=psychologist_id)
+        
+        # Filter by patient ID
+        patient_id = self.request.query_params.get('patient')
+        if patient_id:
+            queryset = queryset.filter(patient_id=patient_id)
+        
+        # Filter by date range
+        date_from = self.request.query_params.get('date_from')
+        if date_from:
+            try:
+                date_from_obj = datetime.strptime(date_from, '%Y-%m-%d').date()
+                queryset = queryset.filter(appointment_date__date__gte=date_from_obj)
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        date_to = self.request.query_params.get('date_to')
+        if date_to:
+            try:
+                date_to_obj = datetime.strptime(date_to, '%Y-%m-%d').date()
+                queryset = queryset.filter(appointment_date__date__lte=date_to_obj)
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        # Order by appointment date (newest first)
+        return queryset.order_by('-appointment_date')
     
     def get_serializer_class(self):
-        if self.action == 'create':
+        """Return appropriate serializer based on action"""
+        if self.action == 'list':
+            # Use AppointmentListSerializer for list view (admin/manager format)
+            return AppointmentListSerializer
+        elif self.action == 'create':
             return AppointmentCreateSerializer
         return AppointmentSerializer
     
@@ -111,10 +164,23 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Store old status for audit log
+        old_status = appointment.status
+        
         # Update appointment status and add cancellation notes
         appointment.status = 'cancelled'
         appointment.notes = request.data.get('notes', '')
         appointment.save()
+        
+        # Log appointment cancellation
+        log_action(
+            user=request.user,
+            action='update',
+            obj=appointment,
+            request=request,
+            changes={'status': {'old': old_status, 'new': 'cancelled'}},
+            metadata={'cancellation_notes': request.data.get('notes', '')}
+        )
         
         serializer = self.get_serializer(appointment)
         return Response(serializer.data)

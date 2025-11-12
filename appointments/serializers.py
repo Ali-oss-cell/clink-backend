@@ -10,6 +10,57 @@ from users.models import User
 from services.models import Service
 
 
+class AppointmentListSerializer(serializers.ModelSerializer):
+    """Serializer for appointment list view (admin/manager) - Frontend ready format"""
+    
+    patient_name = serializers.SerializerMethodField()
+    psychologist_name = serializers.SerializerMethodField()
+    service_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    appointment_date = serializers.SerializerMethodField()
+    appointment_time = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Appointment
+        fields = [
+            'id', 'patient', 'patient_name', 'psychologist', 'psychologist_name',
+            'service', 'service_name', 'appointment_date', 'appointment_time',
+            'duration_minutes', 'status', 'status_display', 'session_type',
+            'notes', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_patient_name(self, obj):
+        """Get patient full name safely"""
+        if obj.patient:
+            return obj.patient.get_full_name() or obj.patient.email
+        return None
+    
+    def get_psychologist_name(self, obj):
+        """Get psychologist full name safely"""
+        if obj.psychologist:
+            return obj.psychologist.get_full_name() or obj.psychologist.email
+        return None
+    
+    def get_service_name(self, obj):
+        """Get service name safely"""
+        if obj.service:
+            return obj.service.name
+        return None
+    
+    def get_appointment_date(self, obj):
+        """Return date in YYYY-MM-DD format"""
+        if obj.appointment_date:
+            return obj.appointment_date.date().isoformat()
+        return None
+    
+    def get_appointment_time(self, obj):
+        """Return time in HH:MM:SS format"""
+        if obj.appointment_date:
+            return obj.appointment_date.time().strftime('%H:%M:%S')
+        return None
+
+
 class AppointmentSerializer(serializers.ModelSerializer):
     """Serializer for appointment data with related information"""
     

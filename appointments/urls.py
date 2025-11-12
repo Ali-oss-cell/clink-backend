@@ -13,9 +13,23 @@ router.register(r'appointments', views.AppointmentViewSet, basename='appointment
 router.register(r'availability', views.AvailabilitySlotViewSet, basename='availability')
 router.register(r'time-slots', views.TimeSlotViewSet, basename='time-slot')
 
+# Filter router URLs to exclude the API root view (which shows endpoint links)
+# The root view is the one that matches empty string and shows all endpoints
+router_urls = []
+for url in router.urls:
+    # Skip the API root view (it's the one that shows endpoint links)
+    # We identify it by checking if it's a simple root pattern
+    pattern_str = str(url.pattern)
+    if pattern_str == '^$' or (pattern_str.startswith('^$') and 'format' not in pattern_str):
+        continue  # Skip root view
+    router_urls.append(url)
+
 urlpatterns = [
-    # ViewSet URLs (handled by router)
-    path('', include(router.urls)),
+    # Direct route for /api/appointments/ to return list (for frontend) - MUST be first
+    path('', views.AppointmentViewSet.as_view({'get': 'list'}), name='appointment-list'),
+    
+    # Include router URLs (detail at /appointments/{id}/, update, delete, etc.)
+    *router_urls,
     
     # Custom appointment actions
     path('book/', views.BookAppointmentView.as_view(), name='book-appointment'),

@@ -55,6 +55,7 @@ urlpatterns = [
     path('api/appointments/', include('appointments.urls')),
     path('api/billing/', include('billing.urls')),
     path('api/resources/', include('resources.urls')),
+    path('api/audit/', include('audit.urls')),
     path('api/core/', include('core.urls')),
     
     # Django Allauth (for social authentication if needed)

@@ -1,0 +1,54 @@
+# Cursor Rules for Psychology Clinic Backend
+
+## Project Status Tracking
+
+**IMPORTANT**: Always reference `PROJECT_STATUS_COMPLETE.md` for the current project status before making changes or implementing new features.
+
+### Key Files to Reference:
+- `PROJECT_STATUS_COMPLETE.md` - **MAIN STATUS FILE** - Always check this first
+- `TODO_LIST.md` - Detailed task list
+- `README.md` - Project overview
+
+### When Making Changes:
+1. **Before starting**: Check `PROJECT_STATUS_COMPLETE.md` to see what's done/not done
+2. **After completing**: Update `PROJECT_STATUS_COMPLETE.md` with new status
+3. **When adding features**: Mark them in the status file
+
+### Project Context:
+- Django REST Framework backend for psychology clinic
+- 4 user roles: Patient, Psychologist, Practice Manager, Admin
+- Australian healthcare compliance (Medicare, AHPRA)
+- Integrations: Twilio (Video, WhatsApp), Stripe (Payments)
+- React TypeScript frontend integration
+
+### Current Status:
+- Overall: ~90% complete
+- Core features: 95% complete
+- Production-ready for core functionality
+- See `PROJECT_STATUS_COMPLETE.md` for detailed breakdown
+
+### Priority Areas:
+1. Celery Beat configuration (automated reminders)
+2. PDF invoice generation
+3. HTML email templates
+4. Frontend video component
+5. Production environment configuration
+
+### Code Style:
+- Follow Django best practices
+- Use DRF ViewSets where appropriate
+- Include comprehensive docstrings
+- Add type hints where helpful
+- Follow PEP 8
+
+### Testing:
+- Write tests for new features
+- Test API endpoints
+- Test role-based permissions
+- Test edge cases
+
+### Documentation:
+- Update `PROJECT_STATUS_COMPLETE.md` when completing features
+- Add API documentation for new endpoints
+- Update relevant markdown docs
+

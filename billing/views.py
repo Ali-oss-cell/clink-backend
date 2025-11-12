@@ -31,6 +31,7 @@ from .serializers import (
     PaymentCreateSerializer,
     MedicareSafetyNetSerializer
 )
+from audit.utils import log_action
 
 
 class MedicareItemNumberViewSet(viewsets.ReadOnlyModelViewSet):
@@ -93,6 +94,18 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         if invoice.medicare_item_number:
             invoice.medicare_rebate = invoice.medicare_item_number.standard_rebate
             invoice.save()
+        
+        # Log invoice creation
+        log_action(
+            user=self.request.user,
+            action='create',
+            obj=invoice,
+            request=self.request,
+            metadata={
+                'invoice_number': invoice.invoice_number,
+                'total_amount': str(invoice.total_amount)
+            }
+        )
     
     @action(detail=True, methods=['post'])
     def create_medicare_claim(self, request, pk=None):
@@ -575,7 +588,12 @@ class DownloadInvoiceView(APIView):
     def get(self, request, invoice_id):
         """Download invoice PDF"""
         try:
-            invoice = Invoice.objects.get(id=invoice_id)
+            invoice = Invoice.objects.select_related(
+                'patient',
+                'appointment',
+                'appointment__psychologist',
+                'medicare_item_number'
+            ).get(id=invoice_id)
             
             # Check permissions
             user = request.user
@@ -585,14 +603,27 @@ class DownloadInvoiceView(APIView):
                     status=status.HTTP_403_FORBIDDEN
                 )
             
-            # For now, return invoice data (PDF generation would be implemented here)
-            return Response({
-                'message': 'PDF generation not implemented yet',
-                'invoice_data': InvoiceSerializer(invoice).data
-            })
+            # Generate PDF
+            from .pdf_service import InvoicePDFService
+            
+            pdf_service = InvoicePDFService()
+            pdf_buffer = pdf_service.generate_invoice_pdf(invoice)
+            
+            # Create HTTP response with PDF
+            from django.http import HttpResponse
+            
+            response = HttpResponse(pdf_buffer.read(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="Invoice_{invoice.invoice_number}.pdf"'
+            
+            return response
             
         except Invoice.DoesNotExist:
             return Response(
                 {'error': 'Invoice not found'},
                 status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Error generating PDF: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, time as dt_time
 from .models import Appointment, AvailabilitySlot, TimeSlot
 from services.models import PsychologistProfile, Service
 from .serializers import AppointmentSerializer, TimeSlotSerializer
+from audit.utils import log_action
 
 User = get_user_model()
 
@@ -447,6 +448,19 @@ class BookAppointmentEnhancedView(APIView):
             time_slot.is_available = False
             time_slot.appointment = appointment
             time_slot.save()
+            
+            # Log appointment creation
+            log_action(
+                user=request.user,
+                action='create',
+                obj=appointment,
+                request=request,
+                metadata={
+                    'psychologist_id': psychologist.id,
+                    'service_id': service.id,
+                    'session_type': session_type
+                }
+            )
             
             # Serialize response
             appointment_data = AppointmentSerializer(appointment).data

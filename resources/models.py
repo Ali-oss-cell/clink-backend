@@ -64,6 +64,20 @@ class Resource(models.Model):
     download_url = models.URLField(blank=True, null=True, help_text="URL for downloadable files")
     thumbnail_url = models.URLField(blank=True, null=True, help_text="Thumbnail image URL")
     
+    # File uploads (server storage)
+    image_file = models.ImageField(
+        upload_to='resources/images/',
+        blank=True,
+        null=True,
+        help_text="Upload thumbnail/cover image (JPEG, PNG, etc.)"
+    )
+    pdf_file = models.FileField(
+        upload_to='resources/pdfs/',
+        blank=True,
+        null=True,
+        help_text="Upload PDF file for worksheets, guides, etc."
+    )
+    
     # Metadata
     author = models.CharField(max_length=255, blank=True, help_text="Author name")
     reviewer = models.CharField(max_length=255, blank=True, help_text="Reviewer name")
