@@ -353,6 +353,7 @@ CONSENT_FORM_VERSION = config('CONSENT_FORM_VERSION', default='1.0')
 TELEHEALTH_CONSENT_VERSION = config('TELEHEALTH_CONSENT_VERSION', default='1.0')
 TELEHEALTH_RECORDING_CONSENT_VERSION = config('TELEHEALTH_RECORDING_CONSENT_VERSION', default='1.0')
 TELEHEALTH_REQUIREMENTS_URL = config('TELEHEALTH_REQUIREMENTS_URL', default='https://yourclinic.com.au/telehealth-requirements')
+PROGRESS_SHARING_CONSENT_VERSION = config('PROGRESS_SHARING_CONSENT_VERSION', default='1.0')
 
 # Third-Party Data Sharing Disclosure (Privacy Act 1988 - APP 8)
 # This documents all third-party services that receive patient data

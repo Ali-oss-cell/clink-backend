@@ -40,13 +40,14 @@ class TwilioVideoService:
         
         self.client = Client(self.account_sid, self.auth_token)
     
-    def create_room(self, appointment_id, appointment_date=None):
+    def create_room(self, appointment_id, appointment_date=None, enable_recording=False):
         """
         Create a Twilio Video room for an appointment
         
         Args:
             appointment_id: Unique appointment identifier
             appointment_date: Scheduled date/time of appointment (optional)
+            enable_recording: Whether to enable recording (requires patient consent)
         
         Returns:
             dict: Room details including room_name, room_sid, and status
@@ -69,7 +70,7 @@ class TwilioVideoService:
                 'max_participants': 2,  # Patient + Psychologist
                 'video_codecs': ['VP8'],  # Standard codec
                 'media_region': 'au1',  # Australia region for low latency
-                'record_participants_on_connect': False,  # No automatic recording
+                'record_participants_on_connect': enable_recording,  # Only record if consent given
                 'empty_room_timeout': 15,  # Close after 15 minutes if empty (allows late joiners)
                 'unused_room_timeout': 30  # Close after 30 minutes if unused (better for longer sessions)
             }

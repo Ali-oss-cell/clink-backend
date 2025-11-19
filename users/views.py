@@ -17,6 +17,7 @@ from django.db.models import Q, Count  # type: ignore
 from django.db import models  # type: ignore
 from django.utils import timezone  # type: ignore
 from datetime import timedelta  # type: ignore
+import re
 
 from .models import PatientProfile, ProgressNote, DataDeletionRequest
 from appointments.models import Appointment
@@ -47,6 +48,38 @@ from .serializers import (
 )
 
 User = get_user_model()
+
+
+def validate_ahpra_number(ahpra_number, role='psychologist'):
+    """
+    Validate AHPRA registration number format
+    
+    Args:
+        ahpra_number: AHPRA registration number string
+        role: User role (default: 'psychologist')
+    
+    Returns:
+        tuple: (is_valid: bool, result: str or error_message: str)
+    """
+    if not ahpra_number:
+        return False, "AHPRA registration number is required"
+    
+    # Clean and normalize
+    cleaned = ahpra_number.replace(' ', '').replace('-', '').replace('_', '').upper()
+    
+    # Validate format: 3 letters + 10 digits
+    pattern = r'^[A-Z]{3}[0-9]{10}$'
+    if not re.match(pattern, cleaned):
+        return False, (
+            "Invalid AHPRA registration number format. "
+            "Expected format: 3 letters (e.g., PSY) followed by 10 digits (e.g., PSY0001234567)"
+        )
+    
+    # Check profession code for psychologists
+    if role == 'psychologist' and cleaned[:3] != 'PSY':
+        return False, "Psychologists must have an AHPRA number starting with 'PSY'"
+    
+    return True, cleaned
 
 
 class UserListPagination(PageNumberPagination):
@@ -105,6 +138,17 @@ class AdminCreateUserView(APIView):
                     {'error': 'AHPRA registration number is required for psychologists'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
+            
+            # Validate AHPRA number format
+            is_valid, result = validate_ahpra_number(ahpra_registration_number, role)
+            if not is_valid:
+                return Response(
+                    {'error': result}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Use normalized value
+            ahpra_registration_number = result
             
             if not ahpra_expiry_date:
                 return Response(
@@ -2366,6 +2410,80 @@ class TelehealthConsentView(APIView):
             'telehealth_tech_requirements_acknowledged': patient_profile.telehealth_tech_requirements_acknowledged,
             'telehealth_recording_consent': patient_profile.telehealth_recording_consent
         }, status=status.HTTP_200_OK)
+
+
+class PatientPreferencesView(APIView):
+    """
+    Patient preferences management endpoint
+    
+    Allows patients to control:
+    - Email notifications
+    - SMS notifications
+    - Appointment reminders
+    - Session recording consent
+    - Progress sharing with emergency contact
+    
+    GET /api/auth/preferences/ - Get current preferences
+    PUT /api/auth/preferences/ - Update preferences
+    PATCH /api/auth/preferences/ - Partial update preferences
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get current patient preferences"""
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can access preferences'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        patient_profile, _ = PatientProfile.objects.get_or_create(user=request.user)
+        
+        from .serializers import PatientPreferencesSerializer
+        serializer = PatientPreferencesSerializer(patient_profile)
+        
+        return Response({
+            'preferences': serializer.data,
+            'emergency_contact': {
+                'name': patient_profile.emergency_contact_name,
+                'phone': patient_profile.emergency_contact_phone,
+                'relationship': patient_profile.emergency_contact_relationship
+            } if patient_profile.emergency_contact_name else None
+        }, status=status.HTTP_200_OK)
+    
+    def put(self, request):
+        """Update all preferences"""
+        return self._update_preferences(request, partial=False)
+    
+    def patch(self, request):
+        """Partially update preferences"""
+        return self._update_preferences(request, partial=True)
+    
+    def _update_preferences(self, request, partial=False):
+        """Internal method to update preferences"""
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can update preferences'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        patient_profile, _ = PatientProfile.objects.get_or_create(user=request.user)
+        
+        from .serializers import PatientPreferencesSerializer
+        serializer = PatientPreferencesSerializer(
+            patient_profile,
+            data=request.data,
+            partial=partial
+        )
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                'message': 'Preferences updated successfully',
+                'preferences': serializer.data
+            }, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ConsentWithdrawalView(APIView):

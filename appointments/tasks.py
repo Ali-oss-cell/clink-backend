@@ -224,11 +224,16 @@ def create_video_room_for_appointment(appointment_id):
             if room_status.get('status') != 'not_found':
                 return {'message': 'Room already exists', 'room_name': appointment.video_room_id}
         
-        # Create video room
+        # Check if patient has consented to recording
+        from core.notification_utils import has_recording_consent
+        enable_recording = has_recording_consent(appointment.patient)
+        
+        # Create video room (with recording only if consent given)
         video_service = get_video_service()
         room_data = video_service.create_room(
             appointment_id=appointment_id,
-            appointment_date=appointment.appointment_date
+            appointment_date=appointment.appointment_date,
+            enable_recording=enable_recording
         )
         
         # Update appointment

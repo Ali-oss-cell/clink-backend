@@ -112,14 +112,38 @@ class PsychologistProfileSerializer(serializers.ModelSerializer):
     
     def validate_ahpra_registration_number(self, value):
         """Validate AHPRA registration number format"""
+        import re
+        
         if not value:
             raise serializers.ValidationError("AHPRA registration number is required")
         
-        # Basic format validation (Australian format)
-        if len(value) < 5 or not value.replace('-', '').isalnum():
-            raise serializers.ValidationError("Invalid AHPRA registration number format")
+        # Remove any spaces, dashes, or hyphens for validation
+        cleaned_value = value.replace(' ', '').replace('-', '').replace('_', '').upper()
         
-        return value
+        # AHPRA format: 3 uppercase letters + 10 digits
+        # Examples: PSY0001234567, PSY1234567890
+        pattern = r'^[A-Z]{3}[0-9]{10}$'
+        
+        if not re.match(pattern, cleaned_value):
+            raise serializers.ValidationError(
+                "Invalid AHPRA registration number format. "
+                "Expected format: 3 letters (e.g., PSY) followed by 10 digits (e.g., PSY0001234567)"
+            )
+        
+        # Check profession code (for psychologists, should be PSY)
+        profession_code = cleaned_value[:3]
+        
+        # For psychologists, ensure it starts with PSY
+        # Check if this is for a psychologist profile
+        if hasattr(self, 'instance') and self.instance:
+            user = getattr(self.instance, 'user', None)
+            if user and user.role == 'psychologist' and profession_code != 'PSY':
+                raise serializers.ValidationError(
+                    "Psychologists must have an AHPRA number starting with 'PSY'"
+                )
+        
+        # Return cleaned value (normalized format)
+        return cleaned_value
     
     def validate_consultation_fee(self, value):
         """Validate consultation fee is positive"""

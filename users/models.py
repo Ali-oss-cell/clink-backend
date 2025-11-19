@@ -258,6 +258,16 @@ class PatientProfile(models.Model):
     consent_to_marketing = models.BooleanField(default=False, help_text="Consent to receive marketing communications (APP 7)")
     consent_to_marketing_date = models.DateTimeField(null=True, blank=True)
     
+    # Communication Preferences
+    email_notifications_enabled = models.BooleanField(default=True, help_text="Patient prefers to receive email notifications")
+    sms_notifications_enabled = models.BooleanField(default=False, help_text="Patient prefers to receive SMS notifications")
+    appointment_reminders_enabled = models.BooleanField(default=True, help_text="Patient prefers to receive appointment reminders")
+    
+    # Privacy Preferences
+    share_progress_with_emergency_contact = models.BooleanField(default=False, help_text="Patient consents to sharing progress updates with emergency contact")
+    share_progress_consent_date = models.DateTimeField(null=True, blank=True, help_text="Date progress sharing consent was given")
+    share_progress_consent_version = models.CharField(max_length=20, blank=True, help_text="Version of progress sharing consent")
+    
     # Consent Withdrawal (APP 7)
     consent_withdrawn = models.BooleanField(default=False, help_text="Patient has withdrawn consent")
     consent_withdrawn_date = models.DateTimeField(null=True, blank=True)

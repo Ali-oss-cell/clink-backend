@@ -85,10 +85,17 @@ def send_whatsapp_reminder(appointment, reminder_type='24h'):
     Returns:
         dict: Message send result for both recipients
     """
+    from core.notification_utils import should_send_sms_notification, should_send_appointment_reminder
+    
     patient = appointment.patient
     psychologist = appointment.psychologist
     
     results = {'patient': {}, 'psychologist': {}}
+    
+    # Check if patient wants reminders and SMS/WhatsApp notifications
+    # Note: WhatsApp uses SMS preferences since it's a messaging channel
+    patient_wants_reminders = should_send_appointment_reminder(patient)
+    patient_wants_sms = should_send_sms_notification(patient)
     
     # Format appointment date/time
     appt_datetime = appointment.appointment_date.strftime('%A, %B %d at %I:%M %p')
@@ -166,7 +173,14 @@ Your session is about to begin!
     message_patient = message
     
     # ========== SEND TO PATIENT ==========
-    if patient.phone_number:
+    if not patient_wants_reminders or not patient_wants_sms:
+        results['patient'] = {
+            'success': False,
+            'skipped': True,
+            'reason': 'Appointment reminders or SMS notifications disabled by patient',
+            'patient_id': patient.id
+        }
+    elif patient.phone_number:
         try:
             whatsapp_service = WhatsAppService()
             results['patient'] = whatsapp_service.send_message(patient.phone_number, message_patient)

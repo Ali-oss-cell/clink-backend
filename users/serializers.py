@@ -6,9 +6,30 @@ Supports intake forms, progress notes, and role-based data access
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+import re
 from .models import PatientProfile, ProgressNote, DataDeletionRequest
 
 User = get_user_model()
+
+
+def validate_ahpra_number_format(ahpra_number, role='psychologist'):
+    """Validate AHPRA registration number format"""
+    if not ahpra_number:
+        return False, "AHPRA registration number is required"
+    
+    cleaned = ahpra_number.replace(' ', '').replace('-', '').replace('_', '').upper()
+    pattern = r'^[A-Z]{3}[0-9]{10}$'
+    
+    if not re.match(pattern, cleaned):
+        return False, (
+            "Invalid AHPRA registration number format. "
+            "Expected format: 3 letters (e.g., PSY) followed by 10 digits"
+        )
+    
+    if role == 'psychologist' and cleaned[:3] != 'PSY':
+        return False, "Psychologists must have an AHPRA number starting with 'PSY'"
+    
+    return True, cleaned
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -163,6 +184,24 @@ class UserUpdateSerializer(serializers.ModelSerializer):
                 attrs['last_name'] = ''
             del attrs['full_name']
         
+        # If updating psychologist profile, validate AHPRA number
+        profile_data = attrs.get('psychologist_profile', {})
+        if profile_data and 'ahpra_registration_number' in profile_data:
+            ahpra_number = profile_data['ahpra_registration_number']
+            # Check if user is a psychologist
+            user_role = getattr(self.instance, 'role', None) if hasattr(self, 'instance') and self.instance else None
+            if not user_role:
+                # Try to get from attrs if updating role
+                user_role = attrs.get('role', 'psychologist')
+            
+            is_valid, result = validate_ahpra_number_format(ahpra_number, user_role if user_role == 'psychologist' else 'psychologist')
+            if not is_valid:
+                raise serializers.ValidationError({
+                    'psychologist_profile': {'ahpra_registration_number': result}
+                })
+            # Update with normalized value
+            profile_data['ahpra_registration_number'] = result
+        
         return attrs
     
     def update(self, instance, validated_data):
@@ -308,6 +347,10 @@ class PatientProfileSerializer(serializers.ModelSerializer):
             'consent_to_data_sharing', 'consent_to_data_sharing_date',
             'consent_to_marketing', 'consent_to_marketing_date',
             'consent_withdrawn', 'consent_withdrawn_date', 'consent_withdrawal_reason',
+            # Communication Preferences
+            'email_notifications_enabled', 'sms_notifications_enabled', 'appointment_reminders_enabled',
+            # Privacy Preferences
+            'share_progress_with_emergency_contact', 'share_progress_consent_date', 'share_progress_consent_version',
             # Parental consent
             'parental_consent', 'parental_consent_name', 'parental_consent_date', 'parental_consent_signature',
             # Legacy fields
@@ -366,6 +409,10 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             'consent_to_data_sharing', 'consent_to_data_sharing_date',
             'consent_to_marketing', 'consent_to_marketing_date',
             'consent_withdrawn', 'consent_withdrawn_date', 'consent_withdrawal_reason',
+            # Communication Preferences
+            'email_notifications_enabled', 'sms_notifications_enabled', 'appointment_reminders_enabled',
+            # Privacy Preferences
+            'share_progress_with_emergency_contact', 'share_progress_consent_date', 'share_progress_consent_version',
             # Parental consent
             'parental_consent', 'parental_consent_name', 'parental_consent_date', 'parental_consent_signature',
             # Legacy fields
@@ -684,3 +731,63 @@ class DataDeletionRequestCreateSerializer(serializers.ModelSerializer):
         deletion_request.save()
         
         return deletion_request
+
+
+class PatientPreferencesSerializer(serializers.ModelSerializer):
+    """
+    Serializer for patient communication and privacy preferences
+    
+    Allows patients to control:
+    - Email notifications
+    - SMS notifications
+    - Appointment reminders
+    - Session recording consent
+    - Progress sharing with emergency contact
+    """
+    
+    class Meta:
+        model = PatientProfile
+        fields = [
+            # Communication Preferences
+            'email_notifications_enabled',
+            'sms_notifications_enabled',
+            'appointment_reminders_enabled',
+            # Privacy Preferences
+            'telehealth_recording_consent',  # Session recording consent
+            'share_progress_with_emergency_contact',
+        ]
+    
+    def update(self, instance, validated_data):
+        """Update preferences with automatic date tracking"""
+        from django.conf import settings
+        
+        # Track when progress sharing consent is given
+        if 'share_progress_with_emergency_contact' in validated_data:
+            share_progress = validated_data['share_progress_with_emergency_contact']
+            if share_progress and not instance.share_progress_with_emergency_contact:
+                # Consent is being given for the first time
+                instance.share_progress_consent_date = timezone.now()
+                instance.share_progress_consent_version = getattr(settings, 'PROGRESS_SHARING_CONSENT_VERSION', '1.0')
+            elif not share_progress:
+                # Consent is being withdrawn
+                instance.share_progress_consent_date = None
+                instance.share_progress_consent_version = ''
+        
+        # Track when recording consent is updated
+        if 'telehealth_recording_consent' in validated_data:
+            recording_consent = validated_data['telehealth_recording_consent']
+            if recording_consent and not instance.telehealth_recording_consent:
+                # Recording consent is being given
+                instance.telehealth_recording_consent_date = timezone.now()
+                instance.telehealth_recording_consent_version = getattr(settings, 'TELEHEALTH_RECORDING_CONSENT_VERSION', '1.0')
+            elif not recording_consent:
+                # Recording consent is being withdrawn
+                instance.telehealth_recording_consent_date = None
+                instance.telehealth_recording_consent_version = ''
+        
+        # Update all fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        return instance

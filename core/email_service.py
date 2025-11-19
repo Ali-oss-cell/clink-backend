@@ -126,8 +126,19 @@ def send_appointment_confirmation(appointment):
     Returns:
         dict: Email send result
     """
+    from core.notification_utils import should_send_email_notification
+    
     patient = appointment.patient
     psychologist = appointment.psychologist
+    
+    # Check if patient wants email notifications
+    if not should_send_email_notification(patient):
+        return {
+            'success': False,
+            'skipped': True,
+            'reason': 'Email notifications disabled by patient',
+            'patient_id': patient.id
+        }
     
     # Format appointment details
     appointment_datetime = appointment.appointment_date.strftime('%A, %B %d, %Y at %I:%M %p')
@@ -193,8 +204,27 @@ def send_appointment_reminder_24h(appointment):
     Returns:
         dict: Email send result
     """
+    from core.notification_utils import should_send_email_notification, should_send_appointment_reminder
+    
     patient = appointment.patient
     psychologist = appointment.psychologist
+    
+    # Check if patient wants reminders and email notifications
+    if not should_send_appointment_reminder(patient):
+        return {
+            'success': False,
+            'skipped': True,
+            'reason': 'Appointment reminders disabled by patient',
+            'patient_id': patient.id
+        }
+    
+    if not should_send_email_notification(patient):
+        return {
+            'success': False,
+            'skipped': True,
+            'reason': 'Email notifications disabled by patient',
+            'patient_id': patient.id
+        }
     
     appointment_datetime = appointment.appointment_date.strftime('%A, %B %d, %Y at %I:%M %p')
     
@@ -343,7 +373,26 @@ def send_meeting_link_reminder(appointment):
     Returns:
         dict: Email send result
     """
+    from core.notification_utils import should_send_email_notification, should_send_appointment_reminder
+    
     patient = appointment.patient
+    
+    # Check if patient wants reminders and email notifications
+    if not should_send_appointment_reminder(patient):
+        return {
+            'success': False,
+            'skipped': True,
+            'reason': 'Appointment reminders disabled by patient',
+            'patient_id': patient.id
+        }
+    
+    if not should_send_email_notification(patient):
+        return {
+            'success': False,
+            'skipped': True,
+            'reason': 'Email notifications disabled by patient',
+            'patient_id': patient.id
+        }
     
     subject = f"Starting Soon: Your Appointment in 15 Minutes"
     
@@ -409,8 +458,19 @@ def send_appointment_cancelled(appointment, cancelled_by):
     Returns:
         dict: Email send result
     """
+    from core.notification_utils import should_send_email_notification
+    
     patient = appointment.patient
     psychologist = appointment.psychologist
+    
+    # Check if patient wants email notifications
+    if not should_send_email_notification(patient):
+        return {
+            'success': False,
+            'skipped': True,
+            'reason': 'Email notifications disabled by patient',
+            'patient_id': patient.id
+        }
     
     appointment_datetime = appointment.appointment_date.strftime('%A, %B %d, %Y at %I:%M %p')
     
@@ -472,8 +532,19 @@ def send_appointment_rescheduled(appointment, old_date):
     Returns:
         dict: Email send result
     """
+    from core.notification_utils import should_send_email_notification
+    
     patient = appointment.patient
     psychologist = appointment.psychologist
+    
+    # Check if patient wants email notifications
+    if not should_send_email_notification(patient):
+        return {
+            'success': False,
+            'skipped': True,
+            'reason': 'Email notifications disabled by patient',
+            'patient_id': patient.id
+        }
     
     old_datetime = old_date.strftime('%A, %B %d, %Y at %I:%M %p')
     new_datetime = appointment.appointment_date.strftime('%A, %B %d, %Y at %I:%M %p')

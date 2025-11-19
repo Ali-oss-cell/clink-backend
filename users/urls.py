@@ -35,6 +35,7 @@ urlpatterns = [
     # Privacy & Consent Compliance (Privacy Act 1988)
     path('privacy-policy/', views.PrivacyPolicyAcceptanceView.as_view(), name='privacy-policy'),
     path('telehealth-consent/', views.TelehealthConsentView.as_view(), name='telehealth-consent'),
+    path('preferences/', views.PatientPreferencesView.as_view(), name='patient-preferences'),
     path('third-party-data-sharing/', views.ThirdPartyDataSharingView.as_view(), name='third-party-data-sharing'),
     path('consent/withdraw/', views.ConsentWithdrawalView.as_view(), name='consent-withdraw'),
     path('data-access-request/', views.DataAccessRequestView.as_view(), name='data-access-request'),

@@ -5,7 +5,9 @@ Handles psychology services, specializations, and psychologist profiles
 
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.exceptions import ValidationError
 from django.utils import timezone
+import re
 
 
 class Specialization(models.Model):
@@ -422,6 +424,40 @@ class PsychologistProfile(models.Model):
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    def clean(self):
+        """Validate AHPRA registration number format"""
+        super().clean()
+        
+        if self.ahpra_registration_number:
+            # Remove spaces/dashes and convert to uppercase
+            cleaned = self.ahpra_registration_number.replace(' ', '').replace('-', '').replace('_', '').upper()
+            
+            # Validate format: 3 letters + 10 digits
+            pattern = r'^[A-Z]{3}[0-9]{10}$'
+            if not re.match(pattern, cleaned):
+                raise ValidationError({
+                    'ahpra_registration_number': (
+                        "Invalid AHPRA registration number format. "
+                        "Expected format: 3 letters (e.g., PSY) followed by 10 digits (e.g., PSY0001234567)"
+                    )
+                })
+            
+            # Ensure it starts with PSY for psychologists
+            if cleaned[:3] != 'PSY':
+                raise ValidationError({
+                    'ahpra_registration_number': (
+                        "Psychologists must have an AHPRA number starting with 'PSY'"
+                    )
+                })
+            
+            # Update to normalized format
+            self.ahpra_registration_number = cleaned
+    
+    def save(self, *args, **kwargs):
+        """Override save to run clean()"""
+        self.full_clean()
+        super().save(*args, **kwargs)
     
     class Meta:
         db_table = 'services_psychologist_profile'
