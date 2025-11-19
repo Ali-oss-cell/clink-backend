@@ -38,6 +38,10 @@ app.conf.beat_schedule = {
         'task': 'core.tasks.cleanup_expired_sessions',
         'schedule': 86400.0,  # Run daily
     },
+    'check-ahpra-expiry': {
+        'task': 'appointments.tasks.check_ahpra_expiry',
+        'schedule': 2592000.0,  # Run monthly (30 days = 2,592,000 seconds)
+    },
 }
 
 app.conf.timezone = settings.TIME_ZONE

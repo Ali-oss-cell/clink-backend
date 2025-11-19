@@ -58,18 +58,28 @@ class TwilioVideoService:
         room_name = self._generate_room_name(appointment_id)
         
         try:
+            # Get status callback URL from settings (optional)
+            from django.conf import settings
+            status_callback_url = getattr(settings, 'TWILIO_STATUS_CALLBACK_URL', None)
+            
             # Create room with settings
-            room = self.client.video.v1.rooms.create(
-                unique_name=room_name,
-                type='group',  # Supports multiple participants
-                max_participants=2,  # Patient + Psychologist
-                status_callback=None,  # Optional: webhook for room events
-                video_codecs=['VP8'],  # Standard codec
-                media_region='au1',  # Australia region for low latency
-                record_participants_on_connect=False,  # No automatic recording
-                empty_room_timeout=5,  # Close after 5 minutes if empty
-                unused_room_timeout=10  # Close after 10 minutes if unused
-            )
+            room_params = {
+                'unique_name': room_name,
+                'type': 'group',  # Supports multiple participants
+                'max_participants': 2,  # Patient + Psychologist
+                'video_codecs': ['VP8'],  # Standard codec
+                'media_region': 'au1',  # Australia region for low latency
+                'record_participants_on_connect': False,  # No automatic recording
+                'empty_room_timeout': 15,  # Close after 15 minutes if empty (allows late joiners)
+                'unused_room_timeout': 30  # Close after 30 minutes if unused (better for longer sessions)
+            }
+            
+            # Add status callback if configured
+            if status_callback_url:
+                room_params['status_callback'] = status_callback_url
+                room_params['status_callback_method'] = 'POST'
+            
+            room = self.client.video.v1.rooms.create(**room_params)
             
             return {
                 'room_name': room.unique_name,
@@ -132,10 +142,12 @@ class TwilioVideoService:
             str: JWT access token for Twilio Video
         """
         # Create access token with identity
+        # Note: Parameters are (signing_key_sid, account_sid, secret)
+        # The issuer (iss) in JWT will be account_sid, subject (sub) will be signing_key_sid
         token = AccessToken(
-            self.account_sid,
-            self.api_key,
-            self.api_secret,
+            self.api_key,      # signing_key_sid (API Key SID) - becomes 'sub' in JWT
+            self.account_sid,  # account_sid - becomes 'iss' in JWT
+            self.api_secret,   # secret
             identity=user_identity,
             ttl=timedelta(hours=ttl_hours).total_seconds()
         )
@@ -169,18 +181,24 @@ class TwilioVideoService:
         except TwilioRestException as e:
             raise Exception(f"Error completing room: {str(e)}")
     
-    def get_room_participants(self, room_sid):
+    def get_room_participants(self, room_sid, status=None):
         """
         Get list of participants in a room
         
         Args:
-            room_sid: Twilio room SID
+            room_sid: Twilio room SID or room name
+            status: Optional filter by status ('connected', 'disconnected', 'reconnecting')
         
         Returns:
             list: Participant details
         """
         try:
-            participants = self.client.video.v1.rooms(room_sid).participants.list()
+            # Build list parameters
+            list_params = {}
+            if status:
+                list_params['status'] = status
+            
+            participants = self.client.video.v1.rooms(room_sid).participants.list(**list_params)
             
             return [
                 {
@@ -188,13 +206,80 @@ class TwilioVideoService:
                     'identity': p.identity,
                     'status': p.status,
                     'duration': p.duration,
-                    'connected_at': p.start_time.isoformat() if p.start_time else None
+                    'connected_at': p.start_time.isoformat() if p.start_time else None,
+                    'disconnected_at': p.end_time.isoformat() if p.end_time else None,
+                    'account_sid': p.account_sid,
+                    'room_sid': p.room_sid,
+                    'date_created': p.date_created.isoformat() if p.date_created else None,
+                    'date_updated': p.date_updated.isoformat() if p.date_updated else None
                 }
                 for p in participants
             ]
         
         except TwilioRestException as e:
             raise Exception(f"Error getting participants: {str(e)}")
+    
+    def get_participant(self, room_sid, participant_identity_or_sid):
+        """
+        Get a specific participant from a room by identity or SID
+        
+        Args:
+            room_sid: Twilio room SID or room name
+            participant_identity_or_sid: Participant identity or SID
+        
+        Returns:
+            dict: Participant details
+        """
+        try:
+            participant = self.client.video.v1.rooms(room_sid).participants(
+                participant_identity_or_sid
+            ).fetch()
+            
+            return {
+                'sid': participant.sid,
+                'identity': participant.identity,
+                'status': participant.status,
+                'duration': participant.duration,
+                'connected_at': participant.start_time.isoformat() if participant.start_time else None,
+                'disconnected_at': participant.end_time.isoformat() if participant.end_time else None,
+                'account_sid': participant.account_sid,
+                'room_sid': participant.room_sid,
+                'date_created': participant.date_created.isoformat() if participant.date_created else None,
+                'date_updated': participant.date_updated.isoformat() if participant.date_updated else None,
+                'url': participant.url
+            }
+        
+        except TwilioRestException as e:
+            raise Exception(f"Error getting participant: {str(e)}")
+    
+    def remove_participant(self, room_sid, participant_identity_or_sid):
+        """
+        Remove/kick a participant from a room by setting status to disconnected
+        
+        Args:
+            room_sid: Twilio room SID or room name
+            participant_identity_or_sid: Participant identity or SID
+        
+        Returns:
+            dict: Updated participant details
+        """
+        try:
+            participant = self.client.video.v1.rooms(room_sid).participants(
+                participant_identity_or_sid
+            ).update(status='disconnected')
+            
+            return {
+                'sid': participant.sid,
+                'identity': participant.identity,
+                'status': participant.status,
+                'duration': participant.duration,
+                'connected_at': participant.start_time.isoformat() if participant.start_time else None,
+                'disconnected_at': participant.end_time.isoformat() if participant.end_time else None,
+                'removed_at': datetime.now().isoformat()
+            }
+        
+        except TwilioRestException as e:
+            raise Exception(f"Error removing participant: {str(e)}")
     
     def get_room_status(self, room_name):
         """
@@ -302,17 +387,34 @@ class TwilioVideoService:
             # Try to fetch account details
             account = self.client.api.accounts(self.account_sid).fetch()
             
+            # Test token generation to verify API Key/Secret match Account SID
+            try:
+                test_token = self.generate_access_token(
+                    user_identity="validation-test",
+                    room_name="validation-room",
+                    ttl_hours=1
+                )
+                token_valid = True
+                token_error = None
+            except Exception as token_error:
+                token_valid = False
+                token_error = str(token_error)
+            
             return {
                 'valid': True,
                 'account_sid': account.sid,
                 'account_status': account.status,
-                'account_type': account.type
+                'account_type': account.type,
+                'api_key_valid': token_valid,
+                'api_key_error': token_error,
+                'credentials_match': token_valid
             }
         
         except TwilioRestException as e:
             return {
                 'valid': False,
-                'error': str(e)
+                'error': str(e),
+                'credentials_match': False
             }
 
 

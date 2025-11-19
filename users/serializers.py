@@ -294,8 +294,20 @@ class PatientProfileSerializer(serializers.ModelSerializer):
             'previous_therapy', 'previous_therapy_details', 'current_medications',
             'medication_list', 'other_health_professionals', 'other_health_details',
             'medical_conditions', 'medical_conditions_details', 'presenting_concerns', 
-            'therapy_goals', 'consent_to_treatment', 'consent_to_telehealth',
-            'client_signature', 'consent_date', 'intake_completed', 'created_at'
+            'therapy_goals', 
+            # Consent fields
+            'consent_to_treatment', 'consent_to_treatment_date', 'consent_to_treatment_version',
+            'consent_to_telehealth', 'consent_to_telehealth_date', 'consent_to_telehealth_version',
+            # Privacy Policy compliance
+            'privacy_policy_accepted', 'privacy_policy_accepted_date', 'privacy_policy_version',
+            'consent_to_data_sharing', 'consent_to_data_sharing_date',
+            'consent_to_marketing', 'consent_to_marketing_date',
+            'consent_withdrawn', 'consent_withdrawn_date', 'consent_withdrawal_reason',
+            # Parental consent
+            'parental_consent', 'parental_consent_name', 'parental_consent_date', 'parental_consent_signature',
+            # Legacy fields
+            'client_signature', 'consent_date', 
+            'intake_completed', 'created_at'
         ]
         read_only_fields = ['user_details', 'created_at']
 
@@ -335,8 +347,20 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             'previous_therapy', 'previous_therapy_details', 'current_medications',
             'medication_list', 'other_health_professionals', 'other_health_details',
             'medical_conditions', 'medical_conditions_details', 'presenting_concerns', 
-            'therapy_goals', 'consent_to_treatment', 'consent_to_telehealth',
-            'client_signature', 'consent_date', 'intake_completed'
+            'therapy_goals', 
+            # Consent fields
+            'consent_to_treatment', 'consent_to_treatment_date', 'consent_to_treatment_version',
+            'consent_to_telehealth', 'consent_to_telehealth_date', 'consent_to_telehealth_version',
+            # Privacy Policy compliance
+            'privacy_policy_accepted', 'privacy_policy_accepted_date', 'privacy_policy_version',
+            'consent_to_data_sharing', 'consent_to_data_sharing_date',
+            'consent_to_marketing', 'consent_to_marketing_date',
+            'consent_withdrawn', 'consent_withdrawn_date', 'consent_withdrawal_reason',
+            # Parental consent
+            'parental_consent', 'parental_consent_name', 'parental_consent_date', 'parental_consent_signature',
+            # Legacy fields
+            'client_signature', 'consent_date', 
+            'intake_completed'
         ]
     
     def to_representation(self, instance):
@@ -366,7 +390,11 @@ class IntakeFormSerializer(serializers.ModelSerializer):
         
         Handles updating user fields (first_name, last_name, etc.) and
         patient profile fields (preferred_name, emergency_contact, etc.)
+        Automatically sets privacy policy and consent versions/dates for compliance.
         """
+        from django.conf import settings
+        from django.utils import timezone
+        
         # Extract user fields from validated_data
         user_data = {}
         user_fields = ['first_name', 'last_name', 'phone_number', 'date_of_birth',
@@ -381,6 +409,42 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             for key, value in user_data.items():
                 setattr(instance.user, key, value)
             instance.user.save()
+        
+        # Handle privacy policy acceptance (APP 1 compliance)
+        if validated_data.get('privacy_policy_accepted') and not instance.privacy_policy_accepted:
+            validated_data['privacy_policy_accepted_date'] = timezone.now()
+            validated_data['privacy_policy_version'] = getattr(settings, 'PRIVACY_POLICY_VERSION', '1.0')
+        
+        # Handle consent to treatment with version tracking
+        if validated_data.get('consent_to_treatment') and not instance.consent_to_treatment:
+            validated_data['consent_to_treatment_date'] = timezone.now()
+            validated_data['consent_to_treatment_version'] = getattr(settings, 'CONSENT_FORM_VERSION', '1.0')
+        
+        # Handle consent to telehealth with version tracking
+        if validated_data.get('consent_to_telehealth') and not instance.consent_to_telehealth:
+            validated_data['consent_to_telehealth_date'] = timezone.now()
+            validated_data['consent_to_telehealth_version'] = getattr(settings, 'TELEHEALTH_CONSENT_VERSION', '1.0')
+        
+        # Handle data sharing consent
+        if validated_data.get('consent_to_data_sharing') and not instance.consent_to_data_sharing:
+            validated_data['consent_to_data_sharing_date'] = timezone.now()
+        
+        # Handle marketing consent
+        if validated_data.get('consent_to_marketing') and not instance.consent_to_marketing:
+            validated_data['consent_to_marketing_date'] = timezone.now()
+        
+        # Handle consent withdrawal
+        if validated_data.get('consent_withdrawn') and not instance.consent_withdrawn:
+            validated_data['consent_withdrawn_date'] = timezone.now()
+            # When consent is withdrawn, set all consent flags to False
+            validated_data['consent_to_treatment'] = False
+            validated_data['consent_to_telehealth'] = False
+            validated_data['consent_to_data_sharing'] = False
+            validated_data['consent_to_marketing'] = False
+        
+        # Handle parental consent
+        if validated_data.get('parental_consent') and not instance.parental_consent:
+            validated_data['parental_consent_date'] = timezone.now()
         
         # Update patient profile fields
         for key, value in validated_data.items():

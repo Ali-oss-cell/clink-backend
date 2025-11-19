@@ -1,6 +1,7 @@
 """
 Email notification service for Psychology Clinic
 Handles all email communications including appointment reminders and confirmations
+Uses SendGrid (via Twilio) for email delivery
 """
 
 from django.core.mail import send_mail, EmailMultiAlternatives
@@ -8,6 +9,111 @@ from django.template.loader import render_to_string
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
+
+# SendGrid imports (optional - falls back to Django SMTP if not configured)
+try:
+    import sendgrid
+    from sendgrid.helpers.mail import Mail, Email, To, Content
+    SENDGRID_AVAILABLE = True
+except ImportError:
+    SENDGRID_AVAILABLE = False
+
+
+def send_email_via_sendgrid(to_email, subject, message, html_message=None):
+    """
+    Send email using SendGrid API (via Twilio)
+    
+    Args:
+        to_email: Recipient email address
+        subject: Email subject
+        message: Plain text message
+        html_message: Optional HTML message
+    
+    Returns:
+        dict: Send result
+    """
+    sendgrid_api_key = getattr(settings, 'SENDGRID_API_KEY', None)
+    
+    # If SendGrid not configured, fall back to Django SMTP
+    if not sendgrid_api_key or not SENDGRID_AVAILABLE:
+        return send_email_via_django(to_email, subject, message, html_message)
+    
+    try:
+        sg = sendgrid.SendGridAPIClient(api_key=sendgrid_api_key)
+        
+        from_email = Email(
+            getattr(settings, 'SENDGRID_FROM_EMAIL', 'noreply@yourclinic.com.au'),
+            getattr(settings, 'SENDGRID_FROM_NAME', 'Psychology Clinic')
+        )
+        to_email_obj = To(to_email)
+        
+        # Create email content
+        if html_message:
+            content = Content("text/html", html_message)
+        else:
+            content = Content("text/plain", message)
+        
+        mail = Mail(from_email, to_email_obj, subject, content)
+        
+        # Send email
+        response = sg.send(mail)
+        
+        return {
+            'success': True,
+            'status_code': response.status_code,
+            'recipient': to_email,
+            'method': 'sendgrid'
+        }
+    
+    except Exception as e:
+        # Fall back to Django SMTP on error
+        return send_email_via_django(to_email, subject, message, html_message)
+
+
+def send_email_via_django(to_email, subject, message, html_message=None):
+    """
+    Send email using Django's SMTP backend (fallback)
+    
+    Args:
+        to_email: Recipient email address
+        subject: Email subject
+        message: Plain text message
+        html_message: Optional HTML message
+    
+    Returns:
+        dict: Send result
+    """
+    try:
+        if html_message:
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[to_email]
+            )
+            email.attach_alternative(html_message, "text/html")
+            email.send()
+        else:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[to_email],
+                fail_silently=False,
+            )
+        
+        return {
+            'success': True,
+            'recipient': to_email,
+            'method': 'django_smtp'
+        }
+    
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'method': 'django_smtp'
+        }
 
 
 def send_appointment_confirmation(appointment):
@@ -65,27 +171,15 @@ Thank you,
 Psychology Clinic Team
 """
     
-    try:
-        # Send email
-        send_mail(
-            subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[patient.email],
-            fail_silently=False,
-        )
-        
-        return {
-            'success': True,
-            'recipient': patient.email,
-            'subject': subject
-        }
+    # Send email via SendGrid (or Django SMTP fallback)
+    result = send_email_via_sendgrid(
+        to_email=patient.email,
+        subject=subject,
+        message=message
+    )
     
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e)
-        }
+    result['subject'] = subject
+    return result
 
 
 def send_appointment_reminder_24h(appointment):
@@ -159,14 +253,11 @@ Psychology Clinic Team
     
     # Send email to patient
     try:
-        send_mail(
+        send_email_via_sendgrid(
+            to_email=patient.email,
             subject=subject_patient,
-            message=message_patient,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[patient.email],
-            fail_silently=False,
+            message=message_patient
         )
-        
         patient_sent = True
     except Exception as e:
         patient_sent = False
@@ -216,12 +307,10 @@ Psychology Clinic Team
     
     # Send email to psychologist
     try:
-        send_mail(
+        send_email_via_sendgrid(
+            to_email=psychologist.email,
             subject=subject_psychologist,
-            message=message_psychologist,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[psychologist.email],
-            fail_silently=False,
+            message=message_psychologist
         )
         
         psychologist_sent = True
@@ -293,19 +382,14 @@ Psychology Clinic Team
 """
     
     try:
-        send_mail(
+        result = send_email_via_sendgrid(
+            to_email=patient.email,
             subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[patient.email],
-            fail_silently=False,
+            message=message
         )
         
-        return {
-            'success': True,
-            'recipient': patient.email,
-            'type': '15min_reminder'
-        }
+        result['type'] = '15min_reminder'
+        return result
     
     except Exception as e:
         return {
@@ -361,19 +445,14 @@ Psychology Clinic Team
 """
     
     try:
-        send_mail(
+        result = send_email_via_sendgrid(
+            to_email=patient.email,
             subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[patient.email],
-            fail_silently=False,
+            message=message
         )
         
-        return {
-            'success': True,
-            'recipient': patient.email,
-            'type': 'cancellation'
-        }
+        result['type'] = 'cancellation'
+        return result
     
     except Exception as e:
         return {
@@ -430,19 +509,14 @@ Psychology Clinic Team
 """
     
     try:
-        send_mail(
+        result = send_email_via_sendgrid(
+            to_email=patient.email,
             subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[patient.email],
-            fail_silently=False,
+            message=message
         )
         
-        return {
-            'success': True,
-            'recipient': patient.email,
-            'type': 'rescheduled'
-        }
+        result['type'] = 'rescheduled'
+        return result
     
     except Exception as e:
         return {
@@ -461,12 +535,10 @@ def test_email_configuration():
     test_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
     
     try:
-        send_mail(
+        result = send_email_via_sendgrid(
+            to_email=test_email,
             subject='Psychology Clinic - Email Configuration Test',
-            message='If you receive this email, your email configuration is working correctly!',
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[test_email],
-            fail_silently=False,
+            message='If you receive this email, your email configuration is working correctly!'
         )
         
         return {
@@ -480,5 +552,179 @@ def test_email_configuration():
             'success': False,
             'error': str(e),
             'email_backend': settings.EMAIL_BACKEND
+        }
+
+
+def send_ahpra_expiry_warning_email(profile, days_until_expiry):
+    """
+    Send AHPRA expiry warning email to psychologist
+    
+    Args:
+        profile: PsychologistProfile instance
+        days_until_expiry: Number of days until AHPRA expires
+    
+    Returns:
+        dict: Email send result
+    """
+    psychologist = profile.user
+    
+    subject = f"⚠️ AHPRA Registration Expiring Soon - {days_until_expiry} Days Remaining"
+    
+    expiry_date = profile.ahpra_expiry_date.strftime('%B %d, %Y')
+    
+    message = f"""
+Dear {psychologist.get_full_name()},
+
+This is an important reminder that your AHPRA registration is expiring soon.
+
+Registration Details:
+---------------------
+AHPRA Number: {profile.ahpra_registration_number}
+Expiry Date: {expiry_date}
+Days Remaining: {days_until_expiry}
+
+Action Required:
+----------------
+Please renew your AHPRA registration before the expiry date to continue practicing.
+
+If your registration expires:
+- You will be automatically suspended from the system
+- All future appointments will be cancelled
+- You will not be able to see patients until registration is renewed
+
+Once you have renewed your registration, please update your profile in the system with:
+- New AHPRA expiry date
+- Updated registration number (if changed)
+
+If you have already renewed your registration, please update your profile immediately.
+
+If you have any questions, please contact the practice manager.
+
+Thank you,
+Psychology Clinic Team
+"""
+    
+    try:
+        result = send_email_via_sendgrid(
+            to_email=psychologist.email,
+            subject=subject,
+            message=message
+        )
+        
+        result['subject'] = subject
+        result['days_until_expiry'] = days_until_expiry
+        return result
+    
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def send_ahpra_expired_email(profile, notify_manager=False, manager=None):
+    """
+    Send AHPRA expired notification email
+    
+    Args:
+        profile: PsychologistProfile instance
+        notify_manager: If True, send to practice manager instead of psychologist
+        manager: Practice manager User instance (if notify_manager=True)
+    
+    Returns:
+        dict: Email send result
+    """
+    psychologist = profile.user
+    expiry_date = profile.ahpra_expiry_date.strftime('%B %d, %Y')
+    
+    if notify_manager and manager:
+        # Email to practice manager
+        subject = f"🚨 AHPRA Registration Expired - {psychologist.get_full_name()}"
+        recipient = manager.email
+        
+        message = f"""
+Dear {manager.get_full_name()},
+
+This is to notify you that a psychologist's AHPRA registration has expired.
+
+Psychologist Details:
+---------------------
+Name: {psychologist.get_full_name()}
+Email: {psychologist.email}
+AHPRA Number: {profile.ahpra_registration_number}
+Expiry Date: {expiry_date}
+
+Actions Taken:
+--------------
+- Psychologist has been automatically suspended
+- All future appointments have been cancelled
+- Patients have been notified of cancellations
+
+Action Required:
+----------------
+Please contact the psychologist to:
+1. Verify if registration has been renewed
+2. Update the profile with new expiry date if renewed
+3. Reactivate the psychologist account once registration is confirmed
+
+If registration has not been renewed, the psychologist cannot practice until it is renewed.
+
+Thank you,
+Psychology Clinic System
+"""
+    else:
+        # Email to psychologist
+        subject = "🚨 AHPRA Registration Expired - Account Suspended"
+        recipient = psychologist.email
+        
+        message = f"""
+Dear {psychologist.get_full_name()},
+
+Your AHPRA registration has expired and your account has been suspended.
+
+Registration Details:
+---------------------
+AHPRA Number: {profile.ahpra_registration_number}
+Expiry Date: {expiry_date}
+
+Actions Taken:
+--------------
+- Your account has been automatically suspended
+- All future appointments have been cancelled
+- Patients have been notified of cancellations
+
+Action Required:
+----------------
+To reactivate your account:
+1. Renew your AHPRA registration
+2. Contact the practice manager
+3. Update your profile with the new AHPRA expiry date
+4. Your account will be reactivated once registration is confirmed
+
+You cannot see patients until your AHPRA registration is renewed and your account is reactivated.
+
+If you have already renewed your registration, please contact the practice manager immediately to update your profile.
+
+If you have any questions, please contact the practice manager.
+
+Thank you,
+Psychology Clinic Team
+"""
+    
+    try:
+        result = send_email_via_sendgrid(
+            to_email=recipient,
+            subject=subject,
+            message=message
+        )
+        
+        result['subject'] = subject
+        result['notify_manager'] = notify_manager
+        return result
+    
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
         }
 

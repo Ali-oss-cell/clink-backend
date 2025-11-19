@@ -366,3 +366,215 @@ def send_rescheduled_email(appointment_id, old_date):
     except Exception as e:
         return {'error': str(e)}
 
+
+@shared_task(name='appointments.check_ahpra_expiry')
+def check_ahpra_expiry():
+    """
+    Check AHPRA registration expiry for all psychologists (AHPRA Compliance)
+    
+    Runs monthly to:
+    - Send warning emails 30 days before expiry
+    - Suspend psychologists with expired registrations
+    - Cancel future appointments for expired psychologists
+    - Notify practice managers
+    
+    Returns:
+        dict: Statistics on checks performed
+    """
+    from services.models import PsychologistProfile
+    from users.models import User
+    from audit.utils import log_action
+    
+    today = timezone.now().date()
+    warning_date = today + timedelta(days=30)
+    
+    stats = {
+        'expiring_soon': 0,
+        'expired': 0,
+        'warnings_sent': 0,
+        'suspended': 0,
+        'appointments_cancelled': 0,
+        'errors': 0
+    }
+    
+    try:
+        # Find psychologists with expiring registrations (within 30 days)
+        expiring_profiles = PsychologistProfile.objects.filter(
+            ahpra_expiry_date__lte=warning_date,
+            ahpra_expiry_date__gt=today,
+            is_active_practitioner=True
+        ).select_related('user')
+        
+        for profile in expiring_profiles:
+            try:
+                # Send warning email
+                send_ahpra_expiry_warning.delay(profile.id)
+                stats['expiring_soon'] += 1
+                stats['warnings_sent'] += 1
+                
+                # Log action
+                log_action(
+                    user=profile.user,
+                    action='ahpra_expiry_warning',
+                    obj=profile,
+                    metadata={
+                        'expiry_date': profile.ahpra_expiry_date.isoformat(),
+                        'days_until_expiry': (profile.ahpra_expiry_date - today).days
+                    }
+                )
+            except Exception as e:
+                stats['errors'] += 1
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Error sending AHPRA expiry warning for {profile.user.email}: {str(e)}')
+        
+        # Find psychologists with expired registrations
+        expired_profiles = PsychologistProfile.objects.filter(
+            ahpra_expiry_date__lt=today,
+            is_active_practitioner=True
+        ).select_related('user')
+        
+        for profile in expired_profiles:
+            try:
+                # Suspend psychologist
+                profile.is_active_practitioner = False
+                profile.save()
+                stats['expired'] += 1
+                stats['suspended'] += 1
+                
+                # Cancel future appointments
+                cancelled_count = cancel_future_appointments_for_psychologist(profile.user)
+                stats['appointments_cancelled'] += cancelled_count
+                
+                # Send notification
+                send_ahpra_expired_notification.delay(profile.id)
+                
+                # Log action
+                log_action(
+                    user=profile.user,
+                    action='ahpra_expired',
+                    obj=profile,
+                    metadata={
+                        'expiry_date': profile.ahpra_expiry_date.isoformat(),
+                        'appointments_cancelled': cancelled_count
+                    }
+                )
+            except Exception as e:
+                stats['errors'] += 1
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Error suspending psychologist {profile.user.email}: {str(e)}')
+        
+        return stats
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Error in check_ahpra_expiry task: {str(e)}')
+        return {'error': str(e), **stats}
+
+
+@shared_task(name='appointments.send_ahpra_expiry_warning')
+def send_ahpra_expiry_warning(psychologist_profile_id):
+    """
+    Send AHPRA expiry warning email to psychologist
+    
+    Args:
+        psychologist_profile_id: PsychologistProfile ID
+    
+    Returns:
+        dict: Email send result
+    """
+    try:
+        from services.models import PsychologistProfile
+        from core.email_service import send_ahpra_expiry_warning_email
+        
+        profile = PsychologistProfile.objects.select_related('user').get(id=psychologist_profile_id)
+        
+        days_until_expiry = (profile.ahpra_expiry_date - timezone.now().date()).days
+        
+        result = send_ahpra_expiry_warning_email(profile, days_until_expiry)
+        
+        return result
+    
+    except PsychologistProfile.DoesNotExist:
+        return {'error': 'Psychologist profile not found'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@shared_task(name='appointments.send_ahpra_expired_notification')
+def send_ahpra_expired_notification(psychologist_profile_id):
+    """
+    Send AHPRA expired notification to psychologist and practice managers
+    
+    Args:
+        psychologist_profile_id: PsychologistProfile ID
+    
+    Returns:
+        dict: Notification result
+    """
+    try:
+        from services.models import PsychologistProfile
+        from users.models import User
+        from core.email_service import send_ahpra_expired_email
+        
+        profile = PsychologistProfile.objects.select_related('user').get(id=psychologist_profile_id)
+        
+        # Send to psychologist
+        result = send_ahpra_expired_email(profile)
+        
+        # Also notify practice managers
+        practice_managers = User.objects.filter(role=User.UserRole.PRACTICE_MANAGER)
+        for manager in practice_managers:
+            try:
+                send_ahpra_expired_email(profile, notify_manager=True, manager=manager)
+            except:
+                pass  # Don't fail if manager notification fails
+        
+        return result
+    
+    except PsychologistProfile.DoesNotExist:
+        return {'error': 'Psychologist profile not found'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def cancel_future_appointments_for_psychologist(psychologist):
+    """
+    Cancel all future appointments for a psychologist (when AHPRA expires)
+    
+    Args:
+        psychologist: User instance (psychologist)
+    
+    Returns:
+        int: Number of appointments cancelled
+    """
+    from django.utils import timezone
+    
+    now = timezone.now()
+    
+    # Find all future appointments
+    future_appointments = Appointment.objects.filter(
+        psychologist=psychologist,
+        appointment_date__gt=now,
+        status__in=['scheduled', 'confirmed']
+    ).select_related('patient')
+    
+    cancelled_count = 0
+    
+    for appointment in future_appointments:
+        appointment.status = 'cancelled'
+        appointment.cancelled_at = now
+        appointment.cancellation_reason = 'AHPRA registration expired. Please contact the clinic for rescheduling.'
+        appointment.save()
+        cancelled_count += 1
+        
+        # Send cancellation notification to patient
+        try:
+            send_cancellation_email.delay(appointment.id, cancelled_by='system')
+        except:
+            pass  # Don't fail if email fails
+    
+    return cancelled_count
+

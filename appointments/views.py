@@ -309,6 +309,46 @@ class BookAppointmentView(APIView):
             psychologist = User.objects.get(id=serializer.validated_data['psychologist_id'])
             service = Service.objects.get(id=serializer.validated_data['service_id'])
             
+            # Medicare Compliance Checks
+            from appointments.booking_views import (
+                check_medicare_session_limit,
+                check_medicare_referral_requirement,
+                validate_medicare_item_number
+            )
+            
+            # 1. Validate Medicare item number
+            if service.medicare_item_number:
+                is_valid, error_msg, _ = validate_medicare_item_number(service.medicare_item_number)
+                if not is_valid:
+                    return Response(
+                        {'error': error_msg},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # 2. Check session limit
+            is_allowed, limit_error, sessions_used, sessions_remaining = check_medicare_session_limit(
+                request.user, service
+            )
+            if not is_allowed:
+                return Response(
+                    {
+                        'error': limit_error,
+                        'medicare_limit_info': {
+                            'sessions_used': sessions_used,
+                            'sessions_remaining': sessions_remaining
+                        }
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # 3. Check referral requirement
+            is_valid, referral_error = check_medicare_referral_requirement(request.user, service)
+            if not is_valid:
+                return Response(
+                    {'error': referral_error},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
             # Create the appointment
             appointment = Appointment.objects.create(
                 patient=request.user,
@@ -530,9 +570,182 @@ class GetVideoAccessTokenView(APIView):
     
     permission_classes = [IsAuthenticated]
     
+    def _calculate_token_ttl(self, appointment):
+        """
+        Calculate token TTL based on appointment duration
+        Formula: max(appointment_duration + 30min buffer, 60min minimum, 4hr maximum)
+        """
+        
+        # Get appointment duration in minutes
+        duration_minutes = appointment.duration_minutes or 60
+        
+        # Calculate token validity: duration + 30 minutes buffer
+        token_minutes = duration_minutes + 30
+        
+        # Apply constraints: minimum 60 minutes, maximum 4 hours
+        token_minutes = max(token_minutes, 60)  # Minimum 1 hour
+        token_minutes = min(token_minutes, 240)  # Maximum 4 hours
+        
+        return token_minutes / 60.0  # Convert to hours
+    
     def get(self, request, appointment_id):
         try:
             from .video_service import get_video_service
+            from django.utils import timezone
+            
+            appointment = Appointment.objects.get(id=appointment_id)
+            
+            # Check permissions
+            if not (request.user == appointment.patient or 
+                   request.user == appointment.psychologist):
+                return Response(
+                    {'error': 'Permission denied'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Check if video room exists
+            if not appointment.video_room_id:
+                return Response(
+                    {'error': 'No video room found for this appointment'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Calculate smart token expiration
+            ttl_hours = self._calculate_token_ttl(appointment)
+            expires_in_seconds = int(ttl_hours * 3600)
+            
+            # Calculate expiration timestamp
+            from datetime import timedelta
+            expires_at = timezone.now() + timedelta(seconds=expires_in_seconds)
+            
+            # Generate access token
+            video_service = get_video_service()
+            user_identity = f"{request.user.id}-{request.user.email}"
+            
+            access_token = video_service.generate_access_token(
+                user_identity=user_identity,
+                room_name=appointment.video_room_id,
+                ttl_hours=ttl_hours
+            )
+            
+            return Response({
+                'access_token': access_token,
+                'room_name': appointment.video_room_id,
+                'user_identity': user_identity,
+                'expires_in': expires_in_seconds,
+                'expires_at': expires_at.isoformat(),
+                'appointment_id': appointment_id,
+                'appointment_duration_minutes': appointment.duration_minutes,
+                'token_valid_until': f"{int(ttl_hours * 60)} minutes ({int(ttl_hours)} hours)"
+            })
+        
+        except Appointment.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to generate access token: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class RefreshVideoAccessTokenView(APIView):
+    """Refresh Twilio access token for an active video session"""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def _calculate_token_ttl(self, appointment):
+        """Calculate token TTL based on appointment duration"""
+        
+        duration_minutes = appointment.duration_minutes or 60
+        token_minutes = duration_minutes + 30
+        token_minutes = max(token_minutes, 60)
+        token_minutes = min(token_minutes, 240)
+        
+        return token_minutes / 60.0
+    
+    def get(self, request, appointment_id):
+        try:
+            from .video_service import get_video_service
+            from django.utils import timezone
+            
+            appointment = Appointment.objects.get(id=appointment_id)
+            
+            # Check permissions
+            if not (request.user == appointment.patient or 
+                   request.user == appointment.psychologist):
+                return Response(
+                    {'error': 'Permission denied'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Check if video room exists
+            if not appointment.video_room_id:
+                return Response(
+                    {'error': 'No video room found for this appointment'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Calculate smart token expiration
+            from datetime import timedelta
+            ttl_hours = self._calculate_token_ttl(appointment)
+            expires_in_seconds = int(ttl_hours * 3600)
+            expires_at = timezone.now() + timedelta(seconds=expires_in_seconds)
+            
+            # Generate new access token
+            video_service = get_video_service()
+            user_identity = f"{request.user.id}-{request.user.email}"
+            
+            access_token = video_service.generate_access_token(
+                user_identity=user_identity,
+                room_name=appointment.video_room_id,
+                ttl_hours=ttl_hours
+            )
+            
+            return Response({
+                'access_token': access_token,
+                'room_name': appointment.video_room_id,
+                'user_identity': user_identity,
+                'expires_in': expires_in_seconds,
+                'expires_at': expires_at.isoformat(),
+                'appointment_id': appointment_id,
+                'refreshed_at': timezone.now().isoformat()
+            })
+        
+        except Appointment.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to refresh access token: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class DebugVideoTokenView(APIView):
+    """Debug endpoint to inspect video token details"""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def _calculate_token_ttl(self, appointment):
+        """Calculate token TTL based on appointment duration"""
+        duration_minutes = appointment.duration_minutes or 60
+        token_minutes = duration_minutes + 30
+        token_minutes = max(token_minutes, 60)
+        token_minutes = min(token_minutes, 240)
+        return token_minutes / 60.0
+    
+    def get(self, request, appointment_id):
+        try:
+            from .video_service import get_video_service
+            from django.utils import timezone
+            from datetime import timedelta
+            import base64
+            import json
             
             appointment = Appointment.objects.get(id=appointment_id)
             
@@ -555,17 +768,113 @@ class GetVideoAccessTokenView(APIView):
             video_service = get_video_service()
             user_identity = f"{request.user.id}-{request.user.email}"
             
+            ttl_hours = self._calculate_token_ttl(appointment)
+            expires_in_seconds = int(ttl_hours * 3600)
+            expires_at = timezone.now() + timedelta(seconds=expires_in_seconds)
+            
             access_token = video_service.generate_access_token(
                 user_identity=user_identity,
                 room_name=appointment.video_room_id,
-                ttl_hours=2  # Token valid for 2 hours
+                ttl_hours=ttl_hours
             )
             
+            # Decode token to inspect it (JWT has 3 parts: header.payload.signature)
+            try:
+                parts = access_token.split('.')
+                if len(parts) == 3:
+                    # Decode header and payload (base64url)
+                    header = json.loads(base64.urlsafe_b64decode(parts[0] + '=='))
+                    payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=='))
+                    
+                    token_info = {
+                        'header': header,
+                        'payload': {
+                            'iss': payload.get('iss'),  # Issuer (Account SID)
+                            'sub': payload.get('sub'),  # Subject (API Key SID)
+                            'grants': payload.get('grants', {}),
+                            'exp': payload.get('exp'),
+                            'iat': payload.get('iat'),
+                            'jti': payload.get('jti'),
+                        }
+                    }
+                else:
+                    token_info = {'error': 'Invalid token format'}
+            except Exception as e:
+                token_info = {'error': f'Could not decode token: {str(e)}'}
+            
             return Response({
-                'access_token': access_token,
+                'token': access_token,
+                'token_info': token_info,
                 'room_name': appointment.video_room_id,
                 'user_identity': user_identity,
-                'expires_in': 7200,  # 2 hours in seconds
+                'expires_in': expires_in_seconds,
+                'expires_at': expires_at.isoformat(),
+                'appointment_id': appointment_id,
+                'credentials_check': {
+                    'account_sid': video_service.account_sid,
+                    'api_key': video_service.api_key,
+                    'api_key_preview': video_service.api_key[:10] + '...' if video_service.api_key else None,
+                }
+            })
+        
+        except Appointment.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to generate debug token: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class VideoRoomStatusView(APIView):
+    """Get video room status and connection information"""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, appointment_id):
+        try:
+            from .video_service import get_video_service
+            
+            appointment = Appointment.objects.get(id=appointment_id)
+            
+            # Check permissions
+            if not (request.user == appointment.patient or 
+                   request.user == appointment.psychologist):
+                return Response(
+                    {'error': 'Permission denied'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Check if video room exists
+            if not appointment.video_room_id:
+                return Response(
+                    {'error': 'No video room found for this appointment'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get room status
+            video_service = get_video_service()
+            room_status = video_service.get_room_status(appointment.video_room_id)
+            
+            # Get participants if room is active
+            participants = []
+            if room_status.get('status') == 'in-progress':
+                try:
+                    participants = video_service.get_room_participants(room_status['room_sid'])
+                except:
+                    participants = []
+            
+            return Response({
+                'room_name': appointment.video_room_id,
+                'room_sid': room_status.get('room_sid'),
+                'status': room_status.get('status'),
+                'participants_count': len(participants),
+                'participants': participants,
+                'duration': room_status.get('duration'),
+                'created_at': room_status.get('created_at'),
                 'appointment_id': appointment_id
             })
         
@@ -576,8 +885,555 @@ class GetVideoAccessTokenView(APIView):
             )
         except Exception as e:
             return Response(
-                {'error': f'Failed to generate access token: {str(e)}'},
+                {'error': f'Failed to get room status: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class VideoRoomParticipantsView(APIView):
+    """
+    List participants in a video room
+    
+    GET /api/appointments/video-participants/<appointment_id>/
+    
+    Query Parameters:
+    - status: Filter by status ('connected', 'disconnected', 'reconnecting')
+    """
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, appointment_id):
+        try:
+            from .video_service import get_video_service
+            
+            appointment = Appointment.objects.get(id=appointment_id)
+            
+            # Check permissions - only appointment participants or admins
+            if not (request.user == appointment.patient or 
+                   request.user == appointment.psychologist or
+                   request.user.is_admin() or
+                   request.user.is_practice_manager()):
+                return Response(
+                    {'error': 'Permission denied'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Check if video room exists
+            if not appointment.video_room_id:
+                return Response(
+                    {'error': 'No video room found for this appointment'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get status filter
+            status_filter = request.query_params.get('status')  # 'connected', 'disconnected', 'reconnecting'
+            
+            # Get room status to get room_sid
+            video_service = get_video_service()
+            room_status = video_service.get_room_status(appointment.video_room_id)
+            
+            if room_status.get('status') == 'not_found':
+                return Response(
+                    {'error': 'Video room not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get participants
+            participants = video_service.get_room_participants(
+                room_status['room_sid'],
+                status=status_filter
+            )
+            
+            return Response({
+                'appointment_id': appointment_id,
+                'room_name': appointment.video_room_id,
+                'room_sid': room_status.get('room_sid'),
+                'room_status': room_status.get('status'),
+                'participants_count': len(participants),
+                'participants': participants,
+                'filter': {'status': status_filter} if status_filter else None
+            })
+        
+        except Appointment.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to get participants: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class VideoRoomParticipantDetailView(APIView):
+    """
+    Get or remove a specific participant from a video room
+    
+    GET /api/appointments/video-participant/<appointment_id>/<participant_identity_or_sid>/
+    POST /api/appointments/video-participant/<appointment_id>/<participant_identity_or_sid>/remove/
+    """
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, appointment_id, participant_identity_or_sid):
+        """Get details of a specific participant"""
+        try:
+            from .video_service import get_video_service
+            
+            appointment = Appointment.objects.get(id=appointment_id)
+            
+            # Check permissions - only appointment participants or admins
+            if not (request.user == appointment.patient or 
+                   request.user == appointment.psychologist or
+                   request.user.is_admin() or
+                   request.user.is_practice_manager()):
+                return Response(
+                    {'error': 'Permission denied'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Check if video room exists
+            if not appointment.video_room_id:
+                return Response(
+                    {'error': 'No video room found for this appointment'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get room status to get room_sid
+            video_service = get_video_service()
+            room_status = video_service.get_room_status(appointment.video_room_id)
+            
+            if room_status.get('status') == 'not_found':
+                return Response(
+                    {'error': 'Video room not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get participant
+            participant = video_service.get_participant(
+                room_status['room_sid'],
+                participant_identity_or_sid
+            )
+            
+            return Response({
+                'appointment_id': appointment_id,
+                'room_name': appointment.video_room_id,
+                'room_sid': room_status.get('room_sid'),
+                'participant': participant
+            })
+        
+        except Appointment.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            error_msg = str(e)
+            if '404' in error_msg or 'not found' in error_msg.lower():
+                return Response(
+                    {'error': 'Participant not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            return Response(
+                {'error': f'Failed to get participant: {error_msg}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def post(self, request, appointment_id, participant_identity_or_sid):
+        """Remove/kick a participant from the room"""
+        try:
+            from .video_service import get_video_service
+            from audit.utils import log_action
+            
+            appointment = Appointment.objects.get(id=appointment_id)
+            
+            # Check permissions - only psychologist or admins can remove participants
+            if not (request.user == appointment.psychologist or
+                   request.user.is_admin() or
+                   request.user.is_practice_manager()):
+                return Response(
+                    {'error': 'Only psychologists or admins can remove participants'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Check if video room exists
+            if not appointment.video_room_id:
+                return Response(
+                    {'error': 'No video room found for this appointment'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get room status to get room_sid
+            video_service = get_video_service()
+            room_status = video_service.get_room_status(appointment.video_room_id)
+            
+            if room_status.get('status') == 'not_found':
+                return Response(
+                    {'error': 'Video room not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get participant before removing (to log)
+            try:
+                participant_before = video_service.get_participant(
+                    room_status['room_sid'],
+                    participant_identity_or_sid
+                )
+            except:
+                participant_before = None
+            
+            # Remove participant
+            participant = video_service.remove_participant(
+                room_status['room_sid'],
+                participant_identity_or_sid
+            )
+            
+            # Log the action
+            log_action(
+                user=request.user,
+                action='update',
+                obj=appointment,
+                request=request,
+                metadata={
+                    'action': 'remove_participant',
+                    'participant_identity': participant.get('identity'),
+                    'participant_sid': participant.get('sid'),
+                    'room_name': appointment.video_room_id
+                }
+            )
+            
+            return Response({
+                'message': 'Participant removed successfully',
+                'appointment_id': appointment_id,
+                'room_name': appointment.video_room_id,
+                'room_sid': room_status.get('room_sid'),
+                'participant': participant
+            })
+        
+        except Appointment.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            error_msg = str(e)
+            if '404' in error_msg or 'not found' in error_msg.lower():
+                return Response(
+                    {'error': 'Participant not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            return Response(
+                {'error': f'Failed to remove participant: {error_msg}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class TwilioStatusCallbackView(APIView):
+    """
+    Comprehensive webhook endpoint for Twilio Video status callbacks
+    
+    Handles all Twilio Video events:
+    
+    Room Events:
+    - room-created: Room created
+    - room-ended: Room completed
+    
+    Participant Events:
+    - participant-connected: Participant joined
+    - participant-disconnected: Participant left
+    
+    Track Events:
+    - track-added: Participant added a Track
+    - track-removed: Participant removed a Track
+    - track-enabled: Participant unpaused a Track
+    - track-disabled: Participant paused a Track
+    
+    Recording Events:
+    - recording-started: Recording for a Track began
+    - recording-completed: Recording for a Track completed
+    - recording-failed: Failure during a recording operation
+    
+    Composition Events:
+    - composition-started: Media processing task started
+    - composition-available: Composition media file ready
+    - composition-progress: Progress report (every ~10%)
+    - composition-failed: Media processing task failed
+    - composition-enqueued: Composition enqueued for processing
+    - composition-hook-failed: Hook failed to create composition
+    
+    This endpoint is called by Twilio via HTTP POST.
+    No authentication required (Twilio validates via request signature).
+    """
+    
+    permission_classes = []  # Public endpoint (Twilio calls it)
+    authentication_classes = []  # No authentication required
+    
+    def post(self, request):
+        """
+        Handle Twilio status callback
+        
+        Processes all event types from Twilio Video:
+        - Room events
+        - Participant events
+        - Track events
+        - Recording events
+        - Composition events
+        """
+        try:
+            # Extract common callback data
+            event_type = request.data.get('StatusCallbackEvent')
+            room_name = request.data.get('RoomName')
+            room_sid = request.data.get('RoomSid')
+            room_status = request.data.get('RoomStatus')
+            timestamp = request.data.get('Timestamp')
+            account_sid = request.data.get('AccountSid')
+            
+            # Log the callback
+            import logging
+            logger = logging.getLogger('psychology_clinic')
+            
+            # Try to find the appointment by room name
+            # Room names are in format: apt-{appointment_id}-{timestamp}-{random}
+            appointment = None
+            if room_name and room_name.startswith('apt-'):
+                try:
+                    appointment_id = int(room_name.split('-')[1])
+                    appointment = Appointment.objects.get(id=appointment_id)
+                except (ValueError, Appointment.DoesNotExist, IndexError):
+                    pass
+            
+            # Route to appropriate handler based on event type
+            if event_type and event_type.startswith('room-'):
+                self._handle_room_event(event_type, request.data, appointment, logger)
+            elif event_type and event_type.startswith('participant-'):
+                self._handle_participant_event(event_type, request.data, appointment, logger)
+            elif event_type and event_type.startswith('track-'):
+                self._handle_track_event(event_type, request.data, appointment, logger)
+            elif event_type and event_type.startswith('recording-'):
+                self._handle_recording_event(event_type, request.data, appointment, logger)
+            elif event_type and event_type.startswith('composition-'):
+                self._handle_composition_event(event_type, request.data, appointment, logger)
+            else:
+                # Unknown event type - log it
+                logger.warning(f"Unknown Twilio event type: {event_type}")
+            
+            # Log all events
+            logger.info(
+                f"Twilio Status Callback: {event_type} | "
+                f"Room: {room_name} | "
+                f"Account: {account_sid} | "
+                f"Timestamp: {timestamp}"
+            )
+            
+            # Return success response (Twilio expects 200 OK)
+            return Response({
+                'status': 'received',
+                'event': event_type,
+                'room': room_name,
+                'timestamp': timestamp
+            }, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            # Log error but still return 200 (Twilio will retry if we return error)
+            import logging
+            logger = logging.getLogger('psychology_clinic')
+            logger.error(f"Error processing Twilio status callback: {str(e)}", exc_info=True)
+            
+            # Return 200 anyway to prevent Twilio from retrying
+            return Response({
+                'status': 'error',
+                'message': str(e)
+            }, status=status.HTTP_200_OK)
+    
+    def _handle_room_event(self, event_type, data, appointment, logger):
+        """Handle room-related events"""
+        room_name = data.get('RoomName')
+        room_sid = data.get('RoomSid')
+        room_status = data.get('RoomStatus')
+        room_duration = data.get('RoomDuration')
+        
+        if event_type == 'room-created':
+            logger.info(f"Room created: {room_name} (SID: {room_sid})")
+            if appointment:
+                # Room already associated with appointment
+                pass
+        
+        elif event_type == 'room-ended':
+            logger.info(f"Room ended: {room_name} | Duration: {room_duration}s")
+            if appointment and appointment.status in ['scheduled', 'confirmed']:
+                # Optionally auto-complete appointment when room ends
+                # Uncomment if you want this behavior:
+                # appointment.status = 'completed'
+                # appointment.save()
+                # logger.info(f"Auto-completed appointment {appointment.id} after room ended")
+                pass
+    
+    def _handle_participant_event(self, event_type, data, appointment, logger):
+        """Handle participant-related events"""
+        participant_sid = data.get('ParticipantSid')
+        participant_identity = data.get('ParticipantIdentity')
+        participant_status = data.get('ParticipantStatus')
+        participant_duration = data.get('ParticipantDuration')
+        room_name = data.get('RoomName')
+        
+        if event_type == 'participant-connected':
+            logger.info(
+                f"Participant connected: {participant_identity} "
+                f"(SID: {participant_sid}) in room {room_name}"
+            )
+            if appointment:
+                # You could log this or update appointment notes
+                pass
+        
+        elif event_type == 'participant-disconnected':
+            logger.info(
+                f"Participant disconnected: {participant_identity} "
+                f"(SID: {participant_sid}) | Duration: {participant_duration}s"
+            )
+            if appointment and participant_duration:
+                # You could store session duration
+                # Example: Store in appointment notes or separate model
+                pass
+    
+    def _handle_track_event(self, event_type, data, appointment, logger):
+        """Handle track-related events (audio/video tracks)"""
+        track_sid = data.get('TrackSid')
+        track_kind = data.get('TrackKind')  # 'audio', 'video', or 'data'
+        participant_sid = data.get('ParticipantSid')
+        participant_identity = data.get('ParticipantIdentity')
+        room_name = data.get('RoomName')
+        
+        logger.info(
+            f"Track event: {event_type} | "
+            f"Kind: {track_kind} | "
+            f"Participant: {participant_identity} | "
+            f"Room: {room_name}"
+        )
+        
+        # Track events are useful for monitoring media quality
+        # You could log these for analytics or troubleshooting
+        if appointment:
+            # Example: Track when participants enable/disable video/audio
+            pass
+    
+    def _handle_recording_event(self, event_type, data, appointment, logger):
+        """Handle recording-related events"""
+        recording_sid = data.get('RecordingSid')
+        room_sid = data.get('RoomSid')
+        room_name = data.get('RoomName')
+        participant_sid = data.get('ParticipantSid')
+        participant_identity = data.get('ParticipantIdentity')
+        track_sid = data.get('SourceSid')
+        track_name = data.get('TrackName')
+        codec = data.get('Codec')
+        container = data.get('Container')
+        
+        if event_type == 'recording-started':
+            logger.info(
+                f"Recording started: {recording_sid} | "
+                f"Room: {room_name} | "
+                f"Participant: {participant_identity} | "
+                f"Track: {track_name} ({codec})"
+            )
+            if appointment:
+                # You could store recording metadata
+                pass
+        
+        elif event_type == 'recording-completed':
+            media_uri = data.get('MediaUri')
+            duration = data.get('Duration')
+            size = data.get('Size')
+            media_external_location = data.get('MediaExternalLocation')
+            
+            logger.info(
+                f"Recording completed: {recording_sid} | "
+                f"Duration: {duration}s | "
+                f"Size: {size} bytes | "
+                f"Media URI: {media_uri}"
+            )
+            if appointment:
+                # Store recording URL and metadata
+                # You could save this to a Recording model or appointment notes
+                # Example:
+                # Recording.objects.create(
+                #     appointment=appointment,
+                #     recording_sid=recording_sid,
+                #     media_uri=media_uri,
+                #     duration=duration,
+                #     size=size,
+                #     participant_identity=participant_identity
+                # )
+                pass
+        
+        elif event_type == 'recording-failed':
+            failed_operation = data.get('FailedOperation')
+            logger.error(
+                f"Recording failed: {recording_sid} | "
+                f"Operation: {failed_operation} | "
+                f"Room: {room_name}"
+            )
+            if appointment:
+                # Log the failure for troubleshooting
+                pass
+    
+    def _handle_composition_event(self, event_type, data, appointment, logger):
+        """Handle composition-related events (video compositions)"""
+        composition_sid = data.get('CompositionSid')
+        room_sid = data.get('RoomSid')
+        hook_sid = data.get('HookSid')
+        
+        if event_type == 'composition-started':
+            logger.info(f"Composition started: {composition_sid} | Room: {room_sid}")
+            if appointment:
+                # Composition processing started
+                pass
+        
+        elif event_type == 'composition-available':
+            media_uri = data.get('MediaUri')
+            duration = data.get('Duration')
+            size = data.get('Size')
+            media_external_location = data.get('MediaExternalLocation')
+            
+            logger.info(
+                f"Composition available: {composition_sid} | "
+                f"Duration: {duration}s | "
+                f"Size: {size} bytes | "
+                f"Media URI: {media_uri}"
+            )
+            if appointment:
+                # Store composition URL and metadata
+                # You could save this to a Composition model
+                pass
+        
+        elif event_type == 'composition-progress':
+            percentage_done = data.get('PercentageDone')
+            seconds_remaining = data.get('SecondsRemaining')
+            logger.info(
+                f"Composition progress: {composition_sid} | "
+                f"{percentage_done}% complete | "
+                f"{seconds_remaining}s remaining"
+            )
+        
+        elif event_type == 'composition-failed':
+            failed_operation = data.get('FailedOperation')
+            error_message = data.get('ErrorMessage')
+            logger.error(
+                f"Composition failed: {composition_sid} | "
+                f"Operation: {failed_operation} | "
+                f"Error: {error_message}"
+            )
+        
+        elif event_type == 'composition-enqueued':
+            logger.info(f"Composition enqueued: {composition_sid} | Hook: {hook_sid}")
+        
+        elif event_type == 'composition-hook-failed':
+            failed_operation = data.get('FailedOperation')
+            error_message = data.get('ErrorMessage')
+            logger.error(
+                f"Composition hook failed: {hook_sid} | "
+                f"Operation: {failed_operation} | "
+                f"Error: {error_message}"
             )
 
 

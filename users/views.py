@@ -515,7 +515,15 @@ class PatientRegistrationView(APIView):
                 }
             }, status=status.HTTP_201_CREATED)
         
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        # Return detailed error messages for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f'Patient registration validation failed: {serializer.errors}')
+        
+        return Response({
+            'error': 'Registration validation failed',
+            'details': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
 
 
 class IntakeFormView(APIView):
@@ -2098,3 +2106,780 @@ class ChangePasswordView(APIView):
         request.user.save()
         
         return Response({'message': 'Password changed successfully'})
+
+
+class PrivacyPolicyAcceptanceView(APIView):
+    """
+    Accept Privacy Policy (Privacy Act 1988 - APP 1 compliance)
+    
+    Endpoint for patients to accept the Privacy Policy.
+    Automatically tracks version and acceptance date.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Accept Privacy Policy"""
+        from django.conf import settings
+        
+        # Check authentication
+        if not request.user.is_authenticated:
+            return Response(
+                {'error': 'Authentication required'}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        # Check if user is a patient
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can accept Privacy Policy'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            # Get or create patient profile
+            patient_profile, created = PatientProfile.objects.get_or_create(
+                user=request.user
+            )
+            
+            # Get latest version
+            latest_version = getattr(settings, 'PRIVACY_POLICY_VERSION', '1.0')
+            policy_url = getattr(settings, 'PRIVACY_POLICY_URL', 'https://yourclinic.com.au/privacy-policy')
+            
+            # Check if already accepted with current version
+            if patient_profile.privacy_policy_accepted:
+                current_version = patient_profile.privacy_policy_version or ''
+                
+                if current_version == latest_version:
+                    return Response({
+                        'message': 'Privacy Policy already accepted',
+                        'accepted_date': patient_profile.privacy_policy_accepted_date.isoformat() if patient_profile.privacy_policy_accepted_date else None,
+                        'version': patient_profile.privacy_policy_version,
+                        'privacy_policy_url': policy_url
+                    })
+            
+            # Accept Privacy Policy
+            patient_profile.privacy_policy_accepted = True
+            patient_profile.privacy_policy_accepted_date = timezone.now()
+            patient_profile.privacy_policy_version = latest_version
+            patient_profile.save()
+            
+            # Log action
+            try:
+                log_action(
+                    user=request.user,
+                    action='privacy_policy_accepted',
+                    obj=patient_profile,
+                    request=request,
+                    metadata={
+                        'version': patient_profile.privacy_policy_version,
+                        'message': f'Accepted Privacy Policy version {patient_profile.privacy_policy_version}'
+                    }
+                )
+            except Exception as log_error:
+                # Don't fail if logging fails
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f'Failed to log Privacy Policy acceptance: {str(log_error)}')
+            
+            return Response({
+                'message': 'Privacy Policy accepted successfully',
+                'accepted_date': patient_profile.privacy_policy_accepted_date.isoformat(),
+                'version': patient_profile.privacy_policy_version,
+                'privacy_policy_url': policy_url
+            })
+        except Exception as e:
+            # Log the error for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error accepting Privacy Policy: {str(e)}', exc_info=True)
+            
+            return Response(
+                {'error': f'Failed to accept Privacy Policy: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def get(self, request):
+        """Get Privacy Policy acceptance status"""
+        from django.conf import settings
+        
+        # Check authentication
+        if not request.user.is_authenticated:
+            return Response(
+                {'error': 'Authentication required'}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        # Check if user is a patient
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can view Privacy Policy status'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            # Get or create patient profile (in case it doesn't exist yet)
+            patient_profile, created = PatientProfile.objects.get_or_create(
+                user=request.user
+            )
+            
+            # Get settings with defaults
+            latest_version = getattr(settings, 'PRIVACY_POLICY_VERSION', '1.0')
+            policy_url = getattr(settings, 'PRIVACY_POLICY_URL', 'https://yourclinic.com.au/privacy-policy')
+            
+            return Response({
+                'accepted': patient_profile.privacy_policy_accepted if patient_profile else False,
+                'accepted_date': patient_profile.privacy_policy_accepted_date.isoformat() if patient_profile and patient_profile.privacy_policy_accepted_date else None,
+                'version': patient_profile.privacy_policy_version if patient_profile and patient_profile.privacy_policy_version else '',
+                'latest_version': latest_version,
+                'needs_update': (
+                    patient_profile.privacy_policy_version != latest_version 
+                    if patient_profile and patient_profile.privacy_policy_version 
+                    else True
+                ),
+                'privacy_policy_url': policy_url
+            })
+        except Exception as e:
+            # Log the error for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error getting Privacy Policy status: {str(e)}', exc_info=True)
+            
+            # Return a safe default response
+            return Response({
+                'accepted': False,
+                'accepted_date': None,
+                'version': '',
+                'latest_version': getattr(settings, 'PRIVACY_POLICY_VERSION', '1.0'),
+                'needs_update': True,
+                'privacy_policy_url': getattr(settings, 'PRIVACY_POLICY_URL', 'https://yourclinic.com.au/privacy-policy'),
+                'error': 'An error occurred while retrieving Privacy Policy status'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ConsentWithdrawalView(APIView):
+    """
+    Withdraw consent (Privacy Act 1988 - APP 7 compliance)
+    
+    Allows patients to withdraw their consent for treatment, data sharing, or marketing.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Withdraw consent"""
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can withdraw consent'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        withdrawal_reason = request.data.get('reason', '')
+        consent_type = request.data.get('consent_type', 'all')  # 'all', 'treatment', 'data_sharing', 'marketing'
+        
+        # Get or create patient profile
+        patient_profile, created = PatientProfile.objects.get_or_create(
+            user=request.user
+        )
+        
+        # Withdraw consent based on type
+        if consent_type == 'all':
+            patient_profile.consent_withdrawn = True
+            patient_profile.consent_to_treatment = False
+            patient_profile.consent_to_telehealth = False
+            patient_profile.consent_to_data_sharing = False
+            patient_profile.consent_to_marketing = False
+        elif consent_type == 'treatment':
+            patient_profile.consent_to_treatment = False
+        elif consent_type == 'data_sharing':
+            patient_profile.consent_to_data_sharing = False
+        elif consent_type == 'marketing':
+            patient_profile.consent_to_marketing = False
+        else:
+            return Response(
+                {'error': 'Invalid consent_type. Must be: all, treatment, data_sharing, or marketing'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        patient_profile.consent_withdrawn_date = timezone.now()
+        patient_profile.consent_withdrawal_reason = withdrawal_reason
+        patient_profile.save()
+        
+        # Log action
+        try:
+            log_action(
+                user=request.user,
+                action='consent_withdrawn',
+                obj=patient_profile,
+                request=request,
+                metadata={
+                    'consent_type': consent_type,
+                    'withdrawal_reason': withdrawal_reason,
+                    'message': f'Withdrew {consent_type} consent. Reason: {withdrawal_reason}'
+                }
+            )
+        except Exception as log_error:
+            # Don't fail if logging fails
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f'Failed to log consent withdrawal: {str(log_error)}')
+        
+        return Response({
+            'message': f'Consent withdrawn successfully ({consent_type})',
+            'withdrawn_date': patient_profile.consent_withdrawn_date,
+            'withdrawal_reason': patient_profile.consent_withdrawal_reason
+        })
+
+
+class DataAccessRequestView(APIView):
+    """
+    Data Access Request (Privacy Act 1988 - APP 12 compliance)
+    
+    Allows patients to request access to all their personal information.
+    Supports multiple formats: JSON (default), PDF, CSV
+    
+    Query Parameters:
+    - export_format: 'json' (default), 'pdf', or 'csv'  (changed from 'format' to avoid DRF conflict)
+    
+    Examples:
+    - GET /api/auth/data-access-request/ (returns JSON)
+    - GET /api/auth/data-access-request/?export_format=pdf (returns PDF)
+    - GET /api/auth/data-access-request/?export_format=csv (returns CSV)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def finalize_response(self, request, response, *args, **kwargs):
+        """Override to bypass DRF rendering for HttpResponse (PDF/CSV files)"""
+        # If it's a Django HttpResponse (not DRF Response), return as-is without DRF processing
+        from django.http import HttpResponse
+        if isinstance(response, HttpResponse) and not isinstance(response, Response):
+            return response
+        # Otherwise, use default DRF finalization for Response objects (JSON)
+        return super().finalize_response(request, response, *args, **kwargs)
+    
+    def get(self, request):
+        """Get all patient data (APP 12 - Right to access personal information)"""
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can request their data'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Get format parameter (renamed from 'format' to 'export_format' to avoid DRF conflict)
+        format_type = request.query_params.get('export_format', 'json').lower()
+        if format_type not in ['json', 'pdf', 'csv']:
+            format_type = 'json'
+        
+        try:
+            patient = request.user
+            
+            # Get patient profile
+            try:
+                patient_profile = patient.patient_profile
+            except PatientProfile.DoesNotExist:
+                patient_profile = None
+            
+            # Get all appointments
+            from appointments.models import Appointment
+            appointments = Appointment.objects.filter(patient=patient).order_by('-appointment_date')
+            
+            # Get progress notes
+            from .models import ProgressNote
+            progress_notes = ProgressNote.objects.filter(patient=patient).order_by('-created_at')
+            
+            # Get billing information
+            from billing.models import Invoice, Payment, MedicareClaim
+            invoices = Invoice.objects.filter(patient=patient).order_by('-created_at')
+            payments = Payment.objects.filter(patient=patient).order_by('-created_at')
+            medicare_claims = MedicareClaim.objects.filter(patient=patient).order_by('-claim_date')
+            
+            # Get audit logs for this patient
+            from audit.models import AuditLog
+            audit_logs = AuditLog.objects.filter(
+                user=patient
+            ).order_by('-timestamp')[:100]  # Last 100 actions
+            
+            # Compile comprehensive data export
+            data_export = {
+                'request_date': timezone.now().isoformat(),
+                'patient_id': patient.id,
+                'personal_information': {
+                    'user_id': patient.id,
+                    'email': patient.email,
+                    'first_name': patient.first_name,
+                    'last_name': patient.last_name,
+                    'phone_number': patient.phone_number,
+                    'date_of_birth': patient.date_of_birth.isoformat() if patient.date_of_birth else None,
+                    'gender': patient.gender,
+                    'address': {
+                        'address_line_1': patient.address_line_1,
+                        'suburb': patient.suburb,
+                        'state': patient.state,
+                        'postcode': patient.postcode,
+                    },
+                    'date_joined': patient.date_joined.isoformat(),
+                    'last_login': patient.last_login.isoformat() if patient.last_login else None,
+                },
+                'patient_profile': None,
+                'appointments': [],
+                'progress_notes': [],
+                'billing': {
+                    'invoices': [],
+                    'payments': [],
+                    'medicare_claims': []
+                },
+                'consent_records': {},
+                'audit_logs': []
+            }
+            
+            # Add patient profile data
+            if patient_profile:
+                data_export['patient_profile'] = {
+                    'preferred_name': patient_profile.preferred_name,
+                    'gender_identity': patient_profile.gender_identity,
+                    'pronouns': patient_profile.pronouns,
+                    'home_phone': patient_profile.home_phone,
+                    'emergency_contact_name': patient_profile.emergency_contact_name,
+                    'emergency_contact_phone': patient_profile.emergency_contact_phone,
+                    'emergency_contact_relationship': patient_profile.emergency_contact_relationship,
+                    'referral_source': patient_profile.referral_source,
+                    'has_gp_referral': patient_profile.has_gp_referral,
+                    'gp_name': patient_profile.gp_name,
+                    'gp_practice_name': patient_profile.gp_practice_name,
+                    'gp_provider_number': patient_profile.gp_provider_number,
+                    'gp_address': patient_profile.gp_address,
+                    'previous_therapy': patient_profile.previous_therapy,
+                    'previous_therapy_details': patient_profile.previous_therapy_details,
+                    'current_medications': patient_profile.current_medications,
+                    'medication_list': patient_profile.medication_list,
+                    'other_health_professionals': patient_profile.other_health_professionals,
+                    'other_health_details': patient_profile.other_health_details,
+                    'medical_conditions': patient_profile.medical_conditions,
+                    'medical_conditions_details': patient_profile.medical_conditions_details,
+                    'presenting_concerns': patient_profile.presenting_concerns,
+                    'therapy_goals': patient_profile.therapy_goals,
+                    'intake_completed': patient_profile.intake_completed,
+                    'created_at': patient_profile.created_at.isoformat() if patient_profile.created_at else None,
+                    'updated_at': patient_profile.updated_at.isoformat() if patient_profile.updated_at else None,
+                }
+                
+                # Add Medicare number from User model if it exists
+                if hasattr(patient, 'medicare_number'):
+                    data_export['personal_information']['medicare_number'] = patient.medicare_number
+                
+                # Add consent records
+                data_export['consent_records'] = {
+                    'privacy_policy_accepted': patient_profile.privacy_policy_accepted,
+                    'privacy_policy_accepted_date': patient_profile.privacy_policy_accepted_date.isoformat() if patient_profile.privacy_policy_accepted_date else None,
+                    'privacy_policy_version': patient_profile.privacy_policy_version,
+                    'consent_to_treatment': patient_profile.consent_to_treatment,
+                    'consent_to_treatment_date': patient_profile.consent_to_treatment_date.isoformat() if patient_profile.consent_to_treatment_date else None,
+                    'consent_to_treatment_version': patient_profile.consent_to_treatment_version,
+                    'consent_to_telehealth': patient_profile.consent_to_telehealth,
+                    'consent_to_telehealth_date': patient_profile.consent_to_telehealth_date.isoformat() if patient_profile.consent_to_telehealth_date else None,
+                    'consent_to_telehealth_version': patient_profile.consent_to_telehealth_version,
+                    'consent_to_data_sharing': patient_profile.consent_to_data_sharing,
+                    'consent_to_data_sharing_date': patient_profile.consent_to_data_sharing_date.isoformat() if patient_profile.consent_to_data_sharing_date else None,
+                    'consent_to_marketing': patient_profile.consent_to_marketing,
+                    'consent_to_marketing_date': patient_profile.consent_to_marketing_date.isoformat() if patient_profile.consent_to_marketing_date else None,
+                    'consent_withdrawn': patient_profile.consent_withdrawn,
+                    'consent_withdrawn_date': patient_profile.consent_withdrawn_date.isoformat() if patient_profile.consent_withdrawn_date else None,
+                    'consent_withdrawal_reason': patient_profile.consent_withdrawal_reason,
+                    'parental_consent': patient_profile.parental_consent,
+                    'parental_consent_name': patient_profile.parental_consent_name,
+                    'parental_consent_date': patient_profile.parental_consent_date.isoformat() if patient_profile.parental_consent_date else None,
+                }
+            
+            # Add appointments
+            for appointment in appointments:
+                data_export['appointments'].append({
+                    'id': appointment.id,
+                    'appointment_date': appointment.appointment_date.isoformat(),
+                    'duration_minutes': appointment.duration_minutes,
+                    'session_type': appointment.session_type,
+                    'status': appointment.status,
+                    'psychologist': {
+                        'id': appointment.psychologist.id,
+                        'name': appointment.psychologist.get_full_name(),
+                        'email': appointment.psychologist.email,
+                    },
+                    'service': {
+                        'id': appointment.service.id if appointment.service else None,
+                        'name': appointment.service.name if appointment.service else None,
+                    },
+                    'notes': appointment.notes,
+                    'created_at': appointment.created_at.isoformat() if appointment.created_at else None,
+                })
+            
+            # Add progress notes (summary only - full notes may be restricted)
+            for note in progress_notes:
+                data_export['progress_notes'].append({
+                    'id': note.id,
+                    'session_date': note.session_date.isoformat() if note.session_date else None,
+                    'session_number': note.session_number,
+                    'created_at': note.created_at.isoformat() if note.created_at else None,
+                    'psychologist': note.psychologist.get_full_name() if note.psychologist else None,
+                    'session_duration': note.session_duration,
+                    'progress_rating': note.progress_rating,
+                    # Note: Full SOAP content may be restricted - only include summary
+                    'has_subjective': bool(note.subjective),
+                    'has_objective': bool(note.objective),
+                    'has_assessment': bool(note.assessment),
+                    'has_plan': bool(note.plan),
+                })
+            
+            # Add billing information
+            for invoice in invoices:
+                data_export['billing']['invoices'].append({
+                    'id': invoice.id,
+                    'invoice_number': invoice.invoice_number,
+                    'amount': str(invoice.amount),
+                    'status': invoice.status,
+                    'created_at': invoice.created_at.isoformat() if invoice.created_at else None,
+                    'due_date': invoice.due_date.isoformat() if invoice.due_date else None,
+                })
+            
+            for payment in payments:
+                data_export['billing']['payments'].append({
+                    'id': payment.id,
+                    'amount': str(payment.amount),
+                    'payment_method': payment.payment_method,
+                    'status': payment.status,
+                    'created_at': payment.created_at.isoformat() if payment.created_at else None,
+                })
+            
+            for claim in medicare_claims:
+                data_export['billing']['medicare_claims'].append({
+                    'id': claim.id,
+                    'claim_date': claim.claim_date.isoformat() if claim.claim_date else None,
+                    'amount': str(claim.amount),
+                    'status': claim.status,
+                    'item_number': claim.medicare_item_number.item_number if claim.medicare_item_number else None,
+                })
+            
+            # Add audit logs (summary)
+            for log in audit_logs:
+                data_export['audit_logs'].append({
+                    'id': log.id,
+                    'action': log.action,
+                    'timestamp': log.timestamp.isoformat() if log.timestamp else None,
+                    'ip_address': log.ip_address,
+                })
+            
+            # Log the data access request
+            try:
+                log_action(
+                    user=patient,
+                    action='data_access_request',
+                    obj=patient,
+                    request=request,
+                    metadata={
+                        'message': 'Patient requested access to their personal information (APP 12)',
+                        'data_exported': True,
+                        'format': format_type
+                    }
+                )
+            except Exception as log_error:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f'Failed to log data access request: {str(log_error)}')
+            
+            # Return data in requested format
+            if format_type == 'pdf':
+                return self._generate_pdf_response(data_export, patient)
+            elif format_type == 'csv':
+                return self._generate_csv_response(data_export, patient)
+            else:
+                # Default: JSON format
+                return Response({
+                    'message': 'Data access request successful',
+                    'request_date': data_export['request_date'],
+                    'format': 'json',
+                    'data': data_export,
+                    'summary': {
+                        'total_appointments': len(data_export['appointments']),
+                        'total_progress_notes': len(data_export['progress_notes']),
+                        'total_invoices': len(data_export['billing']['invoices']),
+                        'total_payments': len(data_export['billing']['payments']),
+                        'total_medicare_claims': len(data_export['billing']['medicare_claims']),
+                    }
+                })
+        
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error processing data access request: {str(e)}', exc_info=True)
+            
+            return Response(
+                {'error': 'An error occurred while processing your data access request. Please contact support.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def _generate_pdf_response(self, data_export, patient):
+        """Generate PDF response for data export"""
+        try:
+            # Try to import reportlab
+            try:
+                from io import BytesIO
+                from reportlab.lib import colors
+                from reportlab.lib.pagesizes import A4
+                from reportlab.lib.units import mm
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib.enums import TA_LEFT, TA_CENTER
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+                from django.http import HttpResponse
+            except ImportError:
+                return Response(
+                    {'error': 'PDF generation is not available. Please install reportlab: pip install reportlab==4.0.7'},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+            
+            buffer = BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=20*mm, leftMargin=20*mm, topMargin=20*mm, bottomMargin=20*mm)
+            story = []
+            styles = getSampleStyleSheet()
+            
+            # Title
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=18,
+                textColor=colors.HexColor('#1a1a1a'),
+                spaceAfter=30,
+                alignment=TA_CENTER
+            )
+            story.append(Paragraph("My Personal Data Export", title_style))
+            story.append(Paragraph(f"Generated: {data_export['request_date']}", styles['Normal']))
+            story.append(Spacer(1, 10*mm))
+            
+            # Personal Information
+            story.append(Paragraph("<b>Personal Information</b>", styles['Heading2']))
+            personal_info = data_export['personal_information']
+            story.append(Paragraph(f"Name: {personal_info.get('first_name', '')} {personal_info.get('last_name', '')}", styles['Normal']))
+            story.append(Paragraph(f"Email: {personal_info.get('email', '')}", styles['Normal']))
+            story.append(Paragraph(f"Phone: {personal_info.get('phone_number', 'N/A')}", styles['Normal']))
+            story.append(Spacer(1, 5*mm))
+            
+            # Summary
+            summary = {
+                'Appointments': len(data_export['appointments']),
+                'Progress Notes': len(data_export['progress_notes']),
+                'Invoices': len(data_export['billing']['invoices']),
+                'Payments': len(data_export['billing']['payments']),
+                'Medicare Claims': len(data_export['billing']['medicare_claims']),
+            }
+            story.append(Paragraph("<b>Summary</b>", styles['Heading2']))
+            for key, value in summary.items():
+                story.append(Paragraph(f"{key}: {value}", styles['Normal']))
+            story.append(Spacer(1, 5*mm))
+            
+            # Note about full data
+            story.append(Paragraph(
+                "<i>Note: This is a summary. For complete data including all details, please download the JSON format.</i>",
+                styles['Italic']
+            ))
+            
+            doc.build(story)
+            buffer.seek(0)
+            
+            response = HttpResponse(buffer.read(), content_type='application/pdf')
+            filename = f"my-data-{patient.get_full_name().replace(' ', '-')}-{timezone.now().strftime('%Y%m%d')}.pdf"
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error generating PDF: {str(e)}', exc_info=True)
+            return Response(
+                {'error': 'Error generating PDF. Please try JSON format.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def _generate_csv_response(self, data_export, patient):
+        """Generate comprehensive CSV response for data export"""
+        try:
+            import csv
+            from django.http import HttpResponse
+            from datetime import datetime
+            
+            response = HttpResponse(content_type='text/csv; charset=utf-8')
+            filename = f"my-data-{patient.get_full_name().replace(' ', '-')}-{timezone.now().strftime('%Y%m%d')}.csv"
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            
+            writer = csv.writer(response)
+            
+            # Header
+            writer.writerow(['Personal Data Export'])
+            writer.writerow(['Generated', data_export['request_date']])
+            writer.writerow(['Patient ID', data_export['patient_id']])
+            writer.writerow([])
+            
+            # Summary Section
+            writer.writerow(['=== SUMMARY ==='])
+            writer.writerow(['Section', 'Count'])
+            writer.writerow(['Appointments', len(data_export['appointments'])])
+            writer.writerow(['Progress Notes', len(data_export['progress_notes'])])
+            writer.writerow(['Invoices', len(data_export['billing']['invoices'])])
+            writer.writerow(['Payments', len(data_export['billing']['payments'])])
+            writer.writerow(['Medicare Claims', len(data_export['billing']['medicare_claims'])])
+            writer.writerow([])
+            
+            # Personal Information Section
+            writer.writerow(['=== PERSONAL INFORMATION ==='])
+            personal_info = data_export['personal_information']
+            writer.writerow(['Field', 'Value'])
+            writer.writerow(['First Name', personal_info.get('first_name', '')])
+            writer.writerow(['Last Name', personal_info.get('last_name', '')])
+            writer.writerow(['Email', personal_info.get('email', '')])
+            writer.writerow(['Phone', personal_info.get('phone_number', 'N/A')])
+            writer.writerow(['Date of Birth', personal_info.get('date_of_birth', 'N/A')])
+            writer.writerow(['Gender', personal_info.get('gender', 'N/A')])
+            if personal_info.get('address'):
+                addr = personal_info['address']
+                writer.writerow(['Address Line 1', addr.get('address_line_1', '')])
+                writer.writerow(['Suburb', addr.get('suburb', '')])
+                writer.writerow(['State', addr.get('state', '')])
+                writer.writerow(['Postcode', addr.get('postcode', '')])
+            writer.writerow(['Date Joined', personal_info.get('date_joined', 'N/A')])
+            writer.writerow(['Last Login', personal_info.get('last_login', 'N/A')])
+            if personal_info.get('medicare_number'):
+                writer.writerow(['Medicare Number', personal_info.get('medicare_number', 'N/A')])
+            writer.writerow([])
+            
+            # Patient Profile Section
+            if data_export.get('patient_profile'):
+                writer.writerow(['=== PATIENT PROFILE ==='])
+                profile = data_export['patient_profile']
+                writer.writerow(['Field', 'Value'])
+                if profile.get('preferred_name'):
+                    writer.writerow(['Preferred Name', profile.get('preferred_name', '')])
+                if profile.get('emergency_contact_name'):
+                    writer.writerow(['Emergency Contact Name', profile.get('emergency_contact_name', '')])
+                    writer.writerow(['Emergency Contact Phone', profile.get('emergency_contact_phone', '')])
+                    writer.writerow(['Emergency Contact Relationship', profile.get('emergency_contact_relationship', '')])
+                if profile.get('gp_name'):
+                    writer.writerow(['GP Name', profile.get('gp_name', '')])
+                    writer.writerow(['GP Practice', profile.get('gp_practice_name', '')])
+                if profile.get('presenting_concerns'):
+                    writer.writerow(['Presenting Concerns', profile.get('presenting_concerns', '')])
+                if profile.get('therapy_goals'):
+                    writer.writerow(['Therapy Goals', profile.get('therapy_goals', '')])
+                writer.writerow([])
+            
+            # Appointments Section
+            if data_export['appointments']:
+                writer.writerow(['=== APPOINTMENTS ==='])
+                writer.writerow(['ID', 'Date', 'Time', 'Duration (min)', 'Type', 'Status', 'Psychologist', 'Service', 'Notes'])
+                for apt in data_export['appointments']:
+                    apt_date = datetime.fromisoformat(apt['appointment_date'].replace('Z', '+00:00')) if apt.get('appointment_date') else ''
+                    date_str = apt_date.strftime('%Y-%m-%d') if apt_date else 'N/A'
+                    time_str = apt_date.strftime('%H:%M') if apt_date else 'N/A'
+                    writer.writerow([
+                        apt.get('id', ''),
+                        date_str,
+                        time_str,
+                        apt.get('duration_minutes', ''),
+                        apt.get('session_type', ''),
+                        apt.get('status', ''),
+                        apt.get('psychologist', {}).get('name', 'N/A'),
+                        apt.get('service', {}).get('name', 'N/A'),
+                        apt.get('notes', '')[:100]  # Truncate long notes
+                    ])
+                writer.writerow([])
+            
+            # Progress Notes Section
+            if data_export['progress_notes']:
+                writer.writerow(['=== PROGRESS NOTES ==='])
+                writer.writerow(['ID', 'Session Date', 'Session Number', 'Psychologist', 'Duration (min)', 'Progress Rating', 'Has Content'])
+                for note in data_export['progress_notes']:
+                    session_date = datetime.fromisoformat(note['session_date'].replace('Z', '+00:00')) if note.get('session_date') else ''
+                    date_str = session_date.strftime('%Y-%m-%d') if session_date else 'N/A'
+                    writer.writerow([
+                        note.get('id', ''),
+                        date_str,
+                        note.get('session_number', ''),
+                        note.get('psychologist', 'N/A'),
+                        note.get('session_duration', ''),
+                        note.get('progress_rating', 'N/A'),
+                        'Yes' if (note.get('has_subjective') or note.get('has_objective') or note.get('has_assessment') or note.get('has_plan')) else 'No'
+                    ])
+                writer.writerow([])
+            
+            # Billing - Invoices Section
+            if data_export['billing']['invoices']:
+                writer.writerow(['=== INVOICES ==='])
+                writer.writerow(['ID', 'Invoice Number', 'Amount', 'Status', 'Created Date', 'Due Date'])
+                for inv in data_export['billing']['invoices']:
+                    created = datetime.fromisoformat(inv['created_at'].replace('Z', '+00:00')) if inv.get('created_at') else ''
+                    due = datetime.fromisoformat(inv['due_date'].replace('Z', '+00:00')) if inv.get('due_date') else ''
+                    writer.writerow([
+                        inv.get('id', ''),
+                        inv.get('invoice_number', ''),
+                        inv.get('amount', ''),
+                        inv.get('status', ''),
+                        created.strftime('%Y-%m-%d') if created else 'N/A',
+                        due.strftime('%Y-%m-%d') if due else 'N/A'
+                    ])
+                writer.writerow([])
+            
+            # Billing - Payments Section
+            if data_export['billing']['payments']:
+                writer.writerow(['=== PAYMENTS ==='])
+                writer.writerow(['ID', 'Amount', 'Payment Method', 'Status', 'Created Date'])
+                for payment in data_export['billing']['payments']:
+                    created = datetime.fromisoformat(payment['created_at'].replace('Z', '+00:00')) if payment.get('created_at') else ''
+                    writer.writerow([
+                        payment.get('id', ''),
+                        payment.get('amount', ''),
+                        payment.get('payment_method', ''),
+                        payment.get('status', ''),
+                        created.strftime('%Y-%m-%d') if created else 'N/A'
+                    ])
+                writer.writerow([])
+            
+            # Billing - Medicare Claims Section
+            if data_export['billing']['medicare_claims']:
+                writer.writerow(['=== MEDICARE CLAIMS ==='])
+                writer.writerow(['ID', 'Claim Date', 'Amount', 'Status', 'Item Number'])
+                for claim in data_export['billing']['medicare_claims']:
+                    claim_date = datetime.fromisoformat(claim['claim_date'].replace('Z', '+00:00')) if claim.get('claim_date') else ''
+                    writer.writerow([
+                        claim.get('id', ''),
+                        claim_date.strftime('%Y-%m-%d') if claim_date else 'N/A',
+                        claim.get('amount', ''),
+                        claim.get('status', ''),
+                        claim.get('item_number', 'N/A')
+                    ])
+                writer.writerow([])
+            
+            # Consent Records Section
+            if data_export.get('consent_records'):
+                writer.writerow(['=== CONSENT RECORDS ==='])
+                consent = data_export['consent_records']
+                writer.writerow(['Field', 'Value', 'Date'])
+                writer.writerow(['Privacy Policy Accepted', 'Yes' if consent.get('privacy_policy_accepted') else 'No', consent.get('privacy_policy_accepted_date', 'N/A')])
+                writer.writerow(['Privacy Policy Version', consent.get('privacy_policy_version', 'N/A'), ''])
+                writer.writerow(['Consent to Treatment', 'Yes' if consent.get('consent_to_treatment') else 'No', consent.get('consent_to_treatment_date', 'N/A')])
+                writer.writerow(['Consent to Telehealth', 'Yes' if consent.get('consent_to_telehealth') else 'No', consent.get('consent_to_telehealth_date', 'N/A')])
+                writer.writerow(['Consent to Data Sharing', 'Yes' if consent.get('consent_to_data_sharing') else 'No', consent.get('consent_to_data_sharing_date', 'N/A')])
+                writer.writerow(['Consent to Marketing', 'Yes' if consent.get('consent_to_marketing') else 'No', consent.get('consent_to_marketing_date', 'N/A')])
+                if consent.get('consent_withdrawn'):
+                    writer.writerow(['Consent Withdrawn', 'Yes', consent.get('consent_withdrawn_date', 'N/A')])
+                    writer.writerow(['Withdrawal Reason', consent.get('consent_withdrawal_reason', 'N/A'), ''])
+                writer.writerow([])
+            
+            # Footer Note
+            writer.writerow(['=== NOTE ==='])
+            writer.writerow(['This CSV export contains a summary of your data.'])
+            writer.writerow(['For complete data including all details, please download the JSON format.'])
+            writer.writerow(['Generated by Psychology Clinic - Data Access Request (APP 12)'])
+            
+            return response
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error generating CSV: {str(e)}', exc_info=True)
+            return Response(
+                {'error': 'Error generating CSV. Please try JSON format.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

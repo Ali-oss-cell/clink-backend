@@ -32,6 +32,12 @@ urlpatterns = [
     path('profile/', views.ProfileView.as_view(), name='user-profile'),
     path('change-password/', views.ChangePasswordView.as_view(), name='change-password'),
     
+    # Privacy & Consent Compliance (Privacy Act 1988)
+    path('privacy-policy/', views.PrivacyPolicyAcceptanceView.as_view(), name='privacy-policy'),
+    path('consent/withdraw/', views.ConsentWithdrawalView.as_view(), name='consent-withdraw'),
+    path('data-access-request/', views.DataAccessRequestView.as_view(), name='data-access-request'),
+    path('data-access-request', views.DataAccessRequestView.as_view(), name='data-access-request-no-slash'),  # Without trailing slash
+    
     # Intake Forms
     path('intake-form/', views.IntakeFormView.as_view(), name='intake-form'),
     
@@ -60,7 +66,7 @@ urlpatterns = [
     path('appointments/book-enhanced/', booking_views.BookAppointmentEnhancedView.as_view(), name='auth-book-appointment-enhanced'),
     path('appointments/booking-summary/', booking_views.AppointmentBookingSummaryView.as_view(), name='auth-booking-summary'),
     
-    # ViewSets for auth endpoints
+    # ViewSets for auth endpoints (must be last to avoid conflicts)
     path('', include(auth_router.urls)),
 ]
 

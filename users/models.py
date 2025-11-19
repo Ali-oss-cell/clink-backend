@@ -211,9 +211,40 @@ class PatientProfile(models.Model):
     
     # Consent & Legal
     consent_to_treatment = models.BooleanField(default=False)
+    consent_to_treatment_date = models.DateTimeField(null=True, blank=True, help_text="Date treatment consent was given")
+    consent_to_treatment_version = models.CharField(max_length=20, blank=True, help_text="Version of consent form accepted")
+    
     consent_to_telehealth = models.BooleanField(default=False)
+    consent_to_telehealth_date = models.DateTimeField(null=True, blank=True, help_text="Date telehealth consent was given")
+    consent_to_telehealth_version = models.CharField(max_length=20, blank=True, help_text="Version of telehealth consent form")
+    
+    # Privacy Policy Compliance (Privacy Act 1988 - APP 1)
+    privacy_policy_accepted = models.BooleanField(default=False, help_text="Patient has accepted Privacy Policy")
+    privacy_policy_accepted_date = models.DateTimeField(null=True, blank=True, help_text="Date Privacy Policy was accepted")
+    privacy_policy_version = models.CharField(max_length=20, blank=True, help_text="Version of Privacy Policy accepted")
+    
+    # Data Sharing Consent (APP 7, APP 8)
+    consent_to_data_sharing = models.BooleanField(default=False, help_text="Consent to share data with third parties (Twilio, Stripe)")
+    consent_to_data_sharing_date = models.DateTimeField(null=True, blank=True)
+    
+    consent_to_marketing = models.BooleanField(default=False, help_text="Consent to receive marketing communications (APP 7)")
+    consent_to_marketing_date = models.DateTimeField(null=True, blank=True)
+    
+    # Consent Withdrawal (APP 7)
+    consent_withdrawn = models.BooleanField(default=False, help_text="Patient has withdrawn consent")
+    consent_withdrawn_date = models.DateTimeField(null=True, blank=True)
+    consent_withdrawal_reason = models.TextField(blank=True, help_text="Reason for consent withdrawal")
+    
+    # Parental Consent (for minors under 18)
+    parental_consent = models.BooleanField(default=False, help_text="Parental consent obtained for minor")
+    parental_consent_name = models.CharField(max_length=255, blank=True, help_text="Name of parent/guardian giving consent")
+    parental_consent_date = models.DateTimeField(null=True, blank=True)
+    parental_consent_signature = models.CharField(max_length=255, blank=True)
+    
+    # Legacy fields (keeping for backward compatibility)
     client_signature = models.CharField(max_length=255, blank=True)
     consent_date = models.DateField(null=True, blank=True)
+    
     intake_completed = models.BooleanField(default=False)
     
     created_at = models.DateTimeField(auto_now_add=True)

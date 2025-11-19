@@ -37,6 +37,14 @@ urlpatterns = [
     path('reschedule/<int:appointment_id>/', views.RescheduleAppointmentView.as_view(), name='reschedule-appointment'),
     path('video-room/<int:appointment_id>/', views.CreateVideoRoomView.as_view(), name='create-video-room'),
     path('video-token/<int:appointment_id>/', views.GetVideoAccessTokenView.as_view(), name='get-video-token'),
+    path('video-token-refresh/<int:appointment_id>/', views.RefreshVideoAccessTokenView.as_view(), name='refresh-video-token'),
+    path('video-token-debug/<int:appointment_id>/', views.DebugVideoTokenView.as_view(), name='debug-video-token'),
+    path('video-status/<int:appointment_id>/', views.VideoRoomStatusView.as_view(), name='video-room-status'),
+    path('video-participants/<int:appointment_id>/', views.VideoRoomParticipantsView.as_view(), name='video-room-participants'),
+    # Remove endpoint must come before detail endpoint (more specific first)
+    path('video-participant/<int:appointment_id>/<str:participant_identity_or_sid>/remove/', views.VideoRoomParticipantDetailView.as_view(), name='video-room-participant-remove'),
+    path('video-participant/<int:appointment_id>/<str:participant_identity_or_sid>/', views.VideoRoomParticipantDetailView.as_view(), name='video-room-participant-detail'),
+    path('twilio-status-callback/', views.TwilioStatusCallbackView.as_view(), name='twilio-status-callback'),
     path('upcoming/', views.UpcomingAppointmentsView.as_view(), name='upcoming-appointments'),
     path('summary/', views.AppointmentSummaryView.as_view(), name='appointment-summary'),
     
@@ -51,8 +59,14 @@ urlpatterns = [
     path('book-enhanced/', booking_views.BookAppointmentEnhancedView.as_view(), name='book-appointment-enhanced'),
     path('booking-summary/', booking_views.AppointmentBookingSummaryView.as_view(), name='booking-summary'),
     
+    # Medicare Session Limit APIs
+    path('medicare-limit-check/', booking_views.MedicareSessionLimitCheckView.as_view(), name='medicare-limit-check'),
+    path('medicare-session-info/', booking_views.MedicareSessionInfoView.as_view(), name='medicare-session-info'),
+    
     # Patient Portal API
     path('patient/appointments/', views.PatientAppointmentsListView.as_view(), name='patient-appointments-list'),
+    # Alias for frontend compatibility (supports /api/appointments/appointments/)
+    path('appointments/', views.PatientAppointmentsListView.as_view(), name='patient-appointments-alias'),
     
     # Psychologist Schedule API
     path('psychologist/schedule/', views.PsychologistScheduleView.as_view(), name='psychologist-schedule'),

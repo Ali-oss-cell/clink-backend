@@ -277,6 +277,10 @@ TWILIO_AUTH_TOKEN = config('TWILIO_AUTH_TOKEN', default='')
 TWILIO_API_KEY = config('TWILIO_API_KEY', default='')
 TWILIO_API_SECRET = config('TWILIO_API_SECRET', default='')
 TWILIO_WHATSAPP_FROM = config('TWILIO_WHATSAPP_FROM', default='whatsapp:+14155238886')
+# Optional: Status callback URL for video room events (webhooks)
+# Set this to your public URL + /api/appointments/twilio-status-callback/
+# For local development, use ngrok or similar: https://your-ngrok-url.ngrok.io/api/appointments/twilio-status-callback/
+TWILIO_STATUS_CALLBACK_URL = config('TWILIO_STATUS_CALLBACK_URL', default='')
 
 # Stripe Configuration
 STRIPE_PUBLISHABLE_KEY = config('STRIPE_PUBLISHABLE_KEY', default='')
@@ -294,7 +298,12 @@ CELERY_TIMEZONE = TIME_ZONE
 # Celery Beat Settings
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 
-# Email Configuration
+# Email Configuration (SendGrid via Twilio)
+SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
+SENDGRID_FROM_EMAIL = config('SENDGRID_FROM_EMAIL', default='noreply@yourclinic.com.au')
+SENDGRID_FROM_NAME = config('SENDGRID_FROM_NAME', default='Psychology Clinic')
+
+# Fallback to Django SMTP if SendGrid not configured
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = config('EMAIL_HOST', default='')
 EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
@@ -303,8 +312,8 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 
 # Default from email
-DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
-SERVER_EMAIL = EMAIL_HOST_USER
+DEFAULT_FROM_EMAIL = SENDGRID_FROM_EMAIL or EMAIL_HOST_USER
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 # Django Allauth Configuration
 ACCOUNT_EMAIL_REQUIRED = True
@@ -336,6 +345,12 @@ SWAGGER_SETTINGS = {
 # Australian Healthcare Specific Settings
 MEDICARE_PROVIDER_NUMBER = config('MEDICARE_PROVIDER_NUMBER', default='')
 AHPRA_REGISTRATION_NUMBER = config('AHPRA_REGISTRATION_NUMBER', default='')
+
+# Privacy Policy Compliance (Privacy Act 1988)
+PRIVACY_POLICY_VERSION = config('PRIVACY_POLICY_VERSION', default='1.0')
+PRIVACY_POLICY_URL = config('PRIVACY_POLICY_URL', default='https://yourclinic.com.au/privacy-policy')
+CONSENT_FORM_VERSION = config('CONSENT_FORM_VERSION', default='1.0')
+TELEHEALTH_CONSENT_VERSION = config('TELEHEALTH_CONSENT_VERSION', default='1.0')
 
 # Australian GST Rate (10%)
 GST_RATE = 0.10

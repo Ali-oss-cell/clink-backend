@@ -20,6 +20,140 @@ from audit.utils import log_action
 User = get_user_model()
 
 
+def check_medicare_session_limit(patient, service):
+    """
+    Check if patient has reached Medicare session limit (10 sessions/year)
+    
+    Args:
+        patient: User instance (patient)
+        service: Service instance
+    
+    Returns:
+        tuple: (is_allowed: bool, error_message: str or None, sessions_used: int, sessions_remaining: int)
+    """
+    from billing.models import MedicareClaim, MedicareItemNumber
+    from django.utils import timezone
+    
+    # If service doesn't have Medicare item number, no limit applies
+    if not service.medicare_item_number:
+        return True, None, 0, None
+    
+    # Get Medicare item number model
+    try:
+        medicare_item = MedicareItemNumber.objects.get(
+            item_number=service.medicare_item_number,
+            is_active=True
+        )
+    except MedicareItemNumber.DoesNotExist:
+        # Item number doesn't exist in our system, allow booking but log warning
+        return True, None, 0, None
+    
+    # Get current year
+    current_year = timezone.now().year
+    
+    # Count sessions this year - check both:
+    # 1. Completed appointments with this Medicare item number
+    # 2. Medicare claims (approved or paid)
+    from .models import Appointment
+    
+    # Count completed appointments this year with this service/item number
+    completed_appointments = Appointment.objects.filter(
+        patient=patient,
+        service__medicare_item_number=service.medicare_item_number,
+        status='completed',
+        appointment_date__year=current_year
+    ).count()
+    
+    # Count Medicare claims this year
+    medicare_claims = MedicareClaim.objects.filter(
+        patient=patient,
+        medicare_item_number=medicare_item,
+        claim_date__year=current_year,
+        status__in=['approved', 'paid']
+    ).count()
+    
+    # Use the higher count (in case some appointments don't have claims yet)
+    sessions_this_year = max(completed_appointments, medicare_claims)
+    
+    # Check if limit reached
+    max_sessions = medicare_item.max_sessions_per_year
+    
+    if sessions_this_year >= max_sessions:
+        return False, f"Medicare session limit reached ({max_sessions} sessions per calendar year). You have used {sessions_this_year} sessions this year.", sessions_this_year, 0
+    
+    sessions_remaining = max_sessions - sessions_this_year
+    
+    return True, None, sessions_this_year, sessions_remaining
+
+
+def check_medicare_referral_requirement(patient, service):
+    """
+    Check if GP referral is required for Medicare-eligible service
+    
+    Args:
+        patient: User instance (patient)
+        service: Service instance
+    
+    Returns:
+        tuple: (is_valid: bool, error_message: str or None)
+    """
+    from billing.models import MedicareItemNumber
+    
+    # If service doesn't have Medicare item number, no referral required
+    if not service.medicare_item_number:
+        return True, None
+    
+    # Get Medicare item number model
+    try:
+        medicare_item = MedicareItemNumber.objects.get(
+            item_number=service.medicare_item_number,
+            is_active=True
+        )
+    except MedicareItemNumber.DoesNotExist:
+        return True, None
+    
+    # Check if referral is required
+    if medicare_item.requires_referral:
+        # Check if patient has GP referral
+        try:
+            patient_profile = patient.patient_profile
+            if not patient_profile.has_gp_referral:
+                return False, "GP referral is required for Medicare rebate. Please provide a referral from your GP before booking."
+            
+            # TODO: Check if referral is still valid (usually 12 months)
+            # For now, just check if referral exists
+            
+        except AttributeError:
+            return False, "Patient profile not found. Please complete your profile."
+    
+    return True, None
+
+
+def validate_medicare_item_number(item_number):
+    """
+    Validate Medicare item number exists and is active
+    
+    Args:
+        item_number: Medicare item number string
+    
+    Returns:
+        tuple: (is_valid: bool, error_message: str or None, medicare_item: MedicareItemNumber or None)
+    """
+    from billing.models import MedicareItemNumber
+    
+    if not item_number:
+        return True, None, None
+    
+    try:
+        medicare_item = MedicareItemNumber.objects.get(
+            item_number=item_number,
+            is_active=True
+        )
+        return True, None, medicare_item
+    except MedicareItemNumber.DoesNotExist:
+        return False, f"Invalid Medicare item number: {item_number}. This item number is not active or does not exist.", None
+
+
 class PsychologistAvailableTimeSlotsView(APIView):
     """
     Get available time slots for a specific psychologist
@@ -431,6 +565,41 @@ class BookAppointmentEnhancedView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Medicare Compliance Checks
+        # 1. Validate Medicare item number (if service has one)
+        if service.medicare_item_number:
+            is_valid, error_msg, medicare_item = validate_medicare_item_number(service.medicare_item_number)
+            if not is_valid:
+                return Response(
+                    {'error': error_msg},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # 2. Check Medicare session limit (10 sessions/year)
+        is_allowed, limit_error, sessions_used, sessions_remaining = check_medicare_session_limit(
+            request.user, service
+        )
+        if not is_allowed:
+            return Response(
+                {
+                    'error': limit_error,
+                    'medicare_limit_info': {
+                        'sessions_used': sessions_used,
+                        'sessions_remaining': sessions_remaining,
+                        'limit_reached': True
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 3. Check GP referral requirement (if Medicare-eligible)
+        is_valid, referral_error = check_medicare_referral_requirement(request.user, service)
+        if not is_valid:
+            return Response(
+                {'error': referral_error},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         # Create appointment
         try:
             appointment = Appointment.objects.create(
@@ -465,19 +634,30 @@ class BookAppointmentEnhancedView(APIView):
             # Serialize response
             appointment_data = AppointmentSerializer(appointment).data
             
+            # Prepare response with Medicare info
+            booking_details = {
+                'psychologist_name': psychologist.get_full_name(),
+                'service_name': service.name,
+                'session_type': session_type,
+                'appointment_date': time_slot.start_time.isoformat(),
+                'duration_minutes': service.duration_minutes,
+                'consultation_fee': str(service.standard_fee),
+                'medicare_rebate': str(service.medicare_rebate),
+                'out_of_pocket_cost': str(service.out_of_pocket_cost)
+            }
+            
+            # Add Medicare session limit info if applicable
+            if service.medicare_item_number and sessions_remaining is not None:
+                booking_details['medicare_limit_info'] = {
+                    'sessions_used': sessions_used,
+                    'sessions_remaining': sessions_remaining,
+                    'max_sessions_per_year': 10
+                }
+            
             return Response({
                 'message': 'Appointment booked successfully',
                 'appointment': appointment_data,
-                'booking_details': {
-                    'psychologist_name': psychologist.get_full_name(),
-                    'service_name': service.name,
-                    'session_type': session_type,
-                    'appointment_date': time_slot.start_time.isoformat(),
-                    'duration_minutes': service.duration_minutes,
-                    'consultation_fee': str(service.standard_fee),
-                    'medicare_rebate': str(service.medicare_rebate),
-                    'out_of_pocket_cost': str(service.out_of_pocket_cost)
-                }
+                'booking_details': booking_details
             }, status=status.HTTP_201_CREATED)
         
         except Exception as e:
@@ -485,6 +665,129 @@ class BookAppointmentEnhancedView(APIView):
                 {'error': f'Failed to create appointment: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class MedicareSessionLimitCheckView(APIView):
+    """
+    Check Medicare session limit for a specific service before booking
+    
+    GET /api/appointments/medicare-limit-check/?service_id=1
+    """
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        service_id = request.query_params.get('service_id')
+        
+        if not service_id:
+            return Response(
+                {'error': 'service_id parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            service = Service.objects.get(id=service_id)
+        except Service.DoesNotExist:
+            return Response(
+                {'error': 'Service not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Check Medicare session limit
+        is_allowed, error_msg, sessions_used, sessions_remaining = check_medicare_session_limit(
+            request.user, service
+        )
+        
+        response_data = {
+            'service_id': service.id,
+            'service_name': service.name,
+            'medicare_item_number': service.medicare_item_number,
+            'is_allowed': is_allowed,
+            'sessions_used': sessions_used,
+            'sessions_remaining': sessions_remaining,
+            'max_sessions': 10,
+            'current_year': timezone.now().year
+        }
+        
+        if not is_allowed:
+            response_data['error'] = error_msg
+        
+        return Response(response_data)
+
+
+class MedicareSessionInfoView(APIView):
+    """
+    Get patient's Medicare session information for current year
+    
+    GET /api/appointments/medicare-session-info/
+    """
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        from billing.models import MedicareItemNumber, MedicareClaim
+        from .models import Appointment
+        
+        current_year = timezone.now().year
+        
+        # Get all Medicare-eligible services the patient has used
+        services_with_medicare = Service.objects.filter(
+            medicare_item_number__isnull=False
+        ).distinct()
+        
+        session_info = []
+        total_sessions_used = 0
+        
+        for service in services_with_medicare:
+            # Count sessions for this service
+            completed_appointments = Appointment.objects.filter(
+                patient=request.user,
+                service=service,
+                status='completed',
+                appointment_date__year=current_year
+            ).count()
+            
+            # Count Medicare claims
+            try:
+                medicare_item = MedicareItemNumber.objects.get(
+                    item_number=service.medicare_item_number,
+                    is_active=True
+                )
+                medicare_claims = MedicareClaim.objects.filter(
+                    patient=request.user,
+                    medicare_item_number=medicare_item,
+                    claim_date__year=current_year,
+                    status__in=['approved', 'paid']
+                ).count()
+            except MedicareItemNumber.DoesNotExist:
+                medicare_claims = 0
+            
+            sessions_used = max(completed_appointments, medicare_claims)
+            sessions_remaining = max(0, 10 - sessions_used)
+            
+            if sessions_used > 0 or service.medicare_item_number:
+                session_info.append({
+                    'service_id': service.id,
+                    'service_name': service.name,
+                    'item_number': service.medicare_item_number,
+                    'sessions_used': sessions_used,
+                    'sessions_remaining': sessions_remaining,
+                    'max_sessions': 10
+                })
+            
+            total_sessions_used = max(total_sessions_used, sessions_used)
+        
+        # Overall summary
+        overall_sessions_remaining = max(0, 10 - total_sessions_used)
+        
+        return Response({
+            'current_year': current_year,
+            'sessions_used': total_sessions_used,
+            'sessions_remaining': overall_sessions_remaining,
+            'max_sessions': 10,
+            'limit_reached': total_sessions_used >= 10,
+            'services': session_info
+        })
 
 
 class AppointmentBookingSummaryView(APIView):

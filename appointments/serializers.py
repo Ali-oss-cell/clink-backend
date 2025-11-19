@@ -20,12 +20,22 @@ class AppointmentListSerializer(serializers.ModelSerializer):
     appointment_date = serializers.SerializerMethodField()
     appointment_time = serializers.SerializerMethodField()
     
+    # Timer fields for session countdown and duration
+    session_start_time = serializers.SerializerMethodField()
+    session_end_time = serializers.SerializerMethodField()
+    time_until_start_seconds = serializers.SerializerMethodField()
+    time_remaining_seconds = serializers.SerializerMethodField()
+    session_status = serializers.SerializerMethodField()
+    can_join_session = serializers.SerializerMethodField()
+    
     class Meta:
         model = Appointment
         fields = [
             'id', 'patient', 'patient_name', 'psychologist', 'psychologist_name',
             'service', 'service_name', 'appointment_date', 'appointment_time',
             'duration_minutes', 'status', 'status_display', 'session_type',
+            'session_start_time', 'session_end_time', 'time_until_start_seconds',
+            'time_remaining_seconds', 'session_status', 'can_join_session',
             'notes', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -59,6 +69,119 @@ class AppointmentListSerializer(serializers.ModelSerializer):
         if obj.appointment_date:
             return obj.appointment_date.time().strftime('%H:%M:%S')
         return None
+    
+    def get_session_start_time(self, obj):
+        """Return session start time as ISO format string"""
+        if obj.appointment_date:
+            return obj.appointment_date.isoformat()
+        return None
+    
+    def get_session_end_time(self, obj):
+        """Return session end time as ISO format string"""
+        if obj.appointment_date and obj.duration_minutes:
+            from datetime import timedelta
+            end_time = obj.appointment_date + timedelta(minutes=obj.duration_minutes)
+            return end_time.isoformat()
+        return None
+    
+    def get_time_until_start_seconds(self, obj):
+        """
+        Calculate seconds until session starts
+        Returns negative if session has already started
+        """
+        if not obj.appointment_date:
+            return None
+        
+        from django.utils import timezone
+        now = timezone.now()
+        time_until = (obj.appointment_date - now).total_seconds()
+        return int(time_until)
+    
+    def get_time_remaining_seconds(self, obj):
+        """
+        Calculate seconds remaining in session
+        Returns None if session hasn't started or has ended
+        """
+        if not obj.appointment_date or not obj.duration_minutes:
+            return None
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # If session hasn't started yet
+        if now < start_time:
+            return None
+        
+        # If session has ended
+        if now >= end_time:
+            return 0
+        
+        # Session is in progress
+        time_remaining = (end_time - now).total_seconds()
+        return int(time_remaining)
+    
+    def get_session_status(self, obj):
+        """
+        Return session status for timer display
+        - 'upcoming': Session hasn't started yet
+        - 'starting_soon': Starts in less than 5 minutes
+        - 'in_progress': Session is currently happening
+        - 'ended': Session has ended
+        """
+        if not obj.appointment_date or not obj.duration_minutes:
+            return 'unknown'
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # Session has ended
+        if now >= end_time:
+            return 'ended'
+        
+        # Session is in progress
+        if now >= start_time:
+            return 'in_progress'
+        
+        # Session hasn't started - check if starting soon
+        time_until_start = (start_time - now).total_seconds()
+        if time_until_start <= 300:  # 5 minutes
+            return 'starting_soon'
+        
+        return 'upcoming'
+    
+    def get_can_join_session(self, obj):
+        """
+        Check if user can join the video session
+        - Can join 5 minutes before start time
+        - Can join during session
+        - Cannot join after session ends
+        """
+        if obj.session_type != 'telehealth' or not obj.video_room_id:
+            return False
+        
+        if not obj.appointment_date or not obj.duration_minutes:
+            return False
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # Can join 5 minutes before start
+        join_window_start = start_time - timedelta(minutes=5)
+        
+        # Can join if within join window
+        return join_window_start <= now <= end_time
 
 
 class AppointmentSerializer(serializers.ModelSerializer):
@@ -71,13 +194,23 @@ class AppointmentSerializer(serializers.ModelSerializer):
     duration_hours = serializers.SerializerMethodField()
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     
+    # Timer fields for session countdown and duration
+    session_start_time = serializers.SerializerMethodField()
+    session_end_time = serializers.SerializerMethodField()
+    time_until_start_seconds = serializers.SerializerMethodField()
+    time_remaining_seconds = serializers.SerializerMethodField()
+    session_status = serializers.SerializerMethodField()
+    can_join_session = serializers.SerializerMethodField()
+    
     class Meta:
         model = Appointment
         fields = [
             'id', 'patient', 'patient_name', 'psychologist', 'psychologist_name',
             'service', 'service_name', 'appointment_date', 'formatted_date',
             'duration_minutes', 'duration_hours', 'status', 'status_display',
-            'session_type', 'notes', 'video_room_id', 'created_at', 'updated_at'
+            'session_type', 'session_start_time', 'session_end_time',
+            'time_until_start_seconds', 'time_remaining_seconds', 'session_status',
+            'can_join_session', 'notes', 'video_room_id', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
@@ -88,6 +221,119 @@ class AppointmentSerializer(serializers.ModelSerializer):
     def get_duration_hours(self, obj):
         """Convert duration to hours for display"""
         return round(obj.duration_minutes / 60, 1)
+    
+    def get_session_start_time(self, obj):
+        """Return session start time as ISO format string"""
+        if obj.appointment_date:
+            return obj.appointment_date.isoformat()
+        return None
+    
+    def get_session_end_time(self, obj):
+        """Return session end time as ISO format string"""
+        if obj.appointment_date and obj.duration_minutes:
+            from datetime import timedelta
+            end_time = obj.appointment_date + timedelta(minutes=obj.duration_minutes)
+            return end_time.isoformat()
+        return None
+    
+    def get_time_until_start_seconds(self, obj):
+        """
+        Calculate seconds until session starts
+        Returns negative if session has already started
+        """
+        if not obj.appointment_date:
+            return None
+        
+        from django.utils import timezone
+        now = timezone.now()
+        time_until = (obj.appointment_date - now).total_seconds()
+        return int(time_until)
+    
+    def get_time_remaining_seconds(self, obj):
+        """
+        Calculate seconds remaining in session
+        Returns None if session hasn't started or has ended
+        """
+        if not obj.appointment_date or not obj.duration_minutes:
+            return None
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # If session hasn't started yet
+        if now < start_time:
+            return None
+        
+        # If session has ended
+        if now >= end_time:
+            return 0
+        
+        # Session is in progress
+        time_remaining = (end_time - now).total_seconds()
+        return int(time_remaining)
+    
+    def get_session_status(self, obj):
+        """
+        Return session status for timer display
+        - 'upcoming': Session hasn't started yet
+        - 'starting_soon': Starts in less than 5 minutes
+        - 'in_progress': Session is currently happening
+        - 'ended': Session has ended
+        """
+        if not obj.appointment_date or not obj.duration_minutes:
+            return 'unknown'
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # Session has ended
+        if now >= end_time:
+            return 'ended'
+        
+        # Session is in progress
+        if now >= start_time:
+            return 'in_progress'
+        
+        # Session hasn't started - check if starting soon
+        time_until_start = (start_time - now).total_seconds()
+        if time_until_start <= 300:  # 5 minutes
+            return 'starting_soon'
+        
+        return 'upcoming'
+    
+    def get_can_join_session(self, obj):
+        """
+        Check if user can join the video session
+        - Can join 5 minutes before start time
+        - Can join during session
+        - Cannot join after session ends
+        """
+        if obj.session_type != 'telehealth' or not obj.video_room_id:
+            return False
+        
+        if not obj.appointment_date or not obj.duration_minutes:
+            return False
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # Can join 5 minutes before start
+        join_window_start = start_time - timedelta(minutes=5)
+        
+        # Can join if within join window
+        return join_window_start <= now <= end_time
     
     def validate_appointment_date(self, value):
         """Validate appointment date is in the future"""
@@ -309,6 +555,14 @@ class PsychologistScheduleSerializer(serializers.ModelSerializer):
     meeting_link = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
     
+    # Timer fields for session countdown and duration
+    session_start_time = serializers.SerializerMethodField()
+    session_end_time = serializers.SerializerMethodField()
+    time_until_start_seconds = serializers.SerializerMethodField()
+    time_remaining_seconds = serializers.SerializerMethodField()
+    session_status = serializers.SerializerMethodField()
+    can_join_session = serializers.SerializerMethodField()
+    
     class Meta:
         model = Appointment
         fields = [
@@ -322,6 +576,12 @@ class PsychologistScheduleSerializer(serializers.ModelSerializer):
             'duration_minutes',
             'session_type',
             'status',
+            'session_start_time',
+            'session_end_time',
+            'time_until_start_seconds',
+            'time_remaining_seconds',
+            'session_status',
+            'can_join_session',
             'notes',
             'location',
             'meeting_link'
@@ -345,6 +605,119 @@ class PsychologistScheduleSerializer(serializers.ModelSerializer):
             base_url = getattr(settings, 'VIDEO_MEETING_BASE_URL', 'https://meet.psychologyclinic.com.au')
             return f"{base_url}/{obj.video_room_id}"
         return None
+    
+    def get_session_start_time(self, obj):
+        """Return session start time as ISO format string"""
+        if obj.appointment_date:
+            return obj.appointment_date.isoformat()
+        return None
+    
+    def get_session_end_time(self, obj):
+        """Return session end time as ISO format string"""
+        if obj.appointment_date and obj.duration_minutes:
+            from datetime import timedelta
+            end_time = obj.appointment_date + timedelta(minutes=obj.duration_minutes)
+            return end_time.isoformat()
+        return None
+    
+    def get_time_until_start_seconds(self, obj):
+        """
+        Calculate seconds until session starts
+        Returns negative if session has already started
+        """
+        if not obj.appointment_date:
+            return None
+        
+        from django.utils import timezone
+        now = timezone.now()
+        time_until = (obj.appointment_date - now).total_seconds()
+        return int(time_until)
+    
+    def get_time_remaining_seconds(self, obj):
+        """
+        Calculate seconds remaining in session
+        Returns None if session hasn't started or has ended
+        """
+        if not obj.appointment_date or not obj.duration_minutes:
+            return None
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # If session hasn't started yet
+        if now < start_time:
+            return None
+        
+        # If session has ended
+        if now >= end_time:
+            return 0
+        
+        # Session is in progress
+        time_remaining = (end_time - now).total_seconds()
+        return int(time_remaining)
+    
+    def get_session_status(self, obj):
+        """
+        Return session status for timer display
+        - 'upcoming': Session hasn't started yet
+        - 'starting_soon': Starts in less than 5 minutes
+        - 'in_progress': Session is currently happening
+        - 'ended': Session has ended
+        """
+        if not obj.appointment_date or not obj.duration_minutes:
+            return 'unknown'
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # Session has ended
+        if now >= end_time:
+            return 'ended'
+        
+        # Session is in progress
+        if now >= start_time:
+            return 'in_progress'
+        
+        # Session hasn't started - check if starting soon
+        time_until_start = (start_time - now).total_seconds()
+        if time_until_start <= 300:  # 5 minutes
+            return 'starting_soon'
+        
+        return 'upcoming'
+    
+    def get_can_join_session(self, obj):
+        """
+        Check if user can join the video session
+        - Can join 5 minutes before start time
+        - Can join during session
+        - Cannot join after session ends
+        """
+        if obj.session_type != 'telehealth' or not obj.video_room_id:
+            return False
+        
+        if not obj.appointment_date or not obj.duration_minutes:
+            return False
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # Can join 5 minutes before start
+        join_window_start = start_time - timedelta(minutes=5)
+        
+        # Can join if within join window
+        return join_window_start <= now <= end_time
     
     def get_location(self, obj):
         """Get location if in-person appointment"""
@@ -376,6 +749,14 @@ class PatientAppointmentDetailSerializer(serializers.ModelSerializer):
     cancellation_deadline = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
     
+    # Timer fields for session countdown and duration
+    session_start_time = serializers.SerializerMethodField()
+    session_end_time = serializers.SerializerMethodField()
+    time_until_start_seconds = serializers.SerializerMethodField()
+    time_remaining_seconds = serializers.SerializerMethodField()
+    session_status = serializers.SerializerMethodField()
+    can_join_session = serializers.SerializerMethodField()
+    
     class Meta:
         model = Appointment
         fields = [
@@ -393,12 +774,18 @@ class PatientAppointmentDetailSerializer(serializers.ModelSerializer):
             'can_reschedule',
             'can_cancel',
             'reschedule_deadline',
-            'cancellation_deadline'
+            'cancellation_deadline',
+            'session_start_time',
+            'session_end_time',
+            'time_until_start_seconds',
+            'time_remaining_seconds',
+            'session_status',
+            'can_join_session'
         ]
     
     def get_formatted_date(self, obj):
-        """Format date as YYYY-MM-DD"""
-        return obj.appointment_date.strftime('%Y-%m-%d')
+        """Format date as "Sat, 15 Nov 2025" """
+        return obj.appointment_date.strftime('%a, %d %b %Y')
     
     def get_formatted_time(self, obj):
         """Format time as HH:MM AM/PM"""
@@ -408,20 +795,23 @@ class PatientAppointmentDetailSerializer(serializers.ModelSerializer):
         """Get psychologist details with profile information"""
         psychologist = obj.psychologist
         profile_image_url = None
-        title = "Psychologist"
+        title_prefix = "Dr"
+        professional_title = "Clinical Psychologist"
         
-        # Get profile image if available
+        # Get profile image and title if available
         if hasattr(psychologist, 'psychologist_profile'):
             profile = psychologist.psychologist_profile
             if profile.profile_image:
                 request = self.context.get('request')
                 if request:
                     profile_image_url = request.build_absolute_uri(profile.profile_image.url)
-            title = profile.title or "Dr"
+            if profile.title:
+                title_prefix = profile.title
+            # You can customize professional_title based on profile if needed
         
         return {
-            'name': f"{title}. {psychologist.get_full_name()}",
-            'title': "Clinical Psychologist",
+            'name': f"{title_prefix}. {psychologist.get_full_name()}",
+            'title': professional_title,
             'profile_image_url': profile_image_url
         }
     
@@ -505,3 +895,116 @@ class PatientAppointmentDetailSerializer(serializers.ModelSerializer):
             return 'no_show'
         
         return 'upcoming'
+    
+    def get_session_start_time(self, obj):
+        """Return session start time as ISO format string"""
+        if obj.appointment_date:
+            return obj.appointment_date.isoformat()
+        return None
+    
+    def get_session_end_time(self, obj):
+        """Return session end time as ISO format string"""
+        if obj.appointment_date and obj.duration_minutes:
+            from datetime import timedelta
+            end_time = obj.appointment_date + timedelta(minutes=obj.duration_minutes)
+            return end_time.isoformat()
+        return None
+    
+    def get_time_until_start_seconds(self, obj):
+        """
+        Calculate seconds until session starts
+        Returns negative if session has already started
+        """
+        if not obj.appointment_date:
+            return None
+        
+        from django.utils import timezone
+        now = timezone.now()
+        time_until = (obj.appointment_date - now).total_seconds()
+        return int(time_until)
+    
+    def get_time_remaining_seconds(self, obj):
+        """
+        Calculate seconds remaining in session
+        Returns None if session hasn't started or has ended
+        """
+        if not obj.appointment_date or not obj.duration_minutes:
+            return None
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # If session hasn't started yet
+        if now < start_time:
+            return None
+        
+        # If session has ended
+        if now >= end_time:
+            return 0
+        
+        # Session is in progress
+        time_remaining = (end_time - now).total_seconds()
+        return int(time_remaining)
+    
+    def get_session_status(self, obj):
+        """
+        Return session status for timer display
+        - 'upcoming': Session hasn't started yet
+        - 'starting_soon': Starts in less than 5 minutes
+        - 'in_progress': Session is currently happening
+        - 'ended': Session has ended
+        """
+        if not obj.appointment_date or not obj.duration_minutes:
+            return 'unknown'
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # Session has ended
+        if now >= end_time:
+            return 'ended'
+        
+        # Session is in progress
+        if now >= start_time:
+            return 'in_progress'
+        
+        # Session hasn't started - check if starting soon
+        time_until_start = (start_time - now).total_seconds()
+        if time_until_start <= 300:  # 5 minutes
+            return 'starting_soon'
+        
+        return 'upcoming'
+    
+    def get_can_join_session(self, obj):
+        """
+        Check if user can join the video session
+        - Can join 5 minutes before start time
+        - Can join during session
+        - Cannot join after session ends
+        """
+        if obj.session_type != 'telehealth' or not obj.video_room_id:
+            return False
+        
+        if not obj.appointment_date or not obj.duration_minutes:
+            return False
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        start_time = obj.appointment_date
+        end_time = start_time + timedelta(minutes=obj.duration_minutes)
+        
+        # Can join 5 minutes before start
+        join_window_start = start_time - timedelta(minutes=5)
+        
+        # Can join if within join window
+        return join_window_start <= now <= end_time
