@@ -217,4 +217,112 @@ class TimeSlot(models.Model):
 
     def __str__(self):
         return f"{self.psychologist.get_full_name()} - {self.date} {self.start_time.time()}-{self.end_time.time()}"
+
+
+class SessionRecording(models.Model):
+    """
+    Store video session recording metadata
+    
+    Records are created when Twilio completes recording a telehealth session.
+    This model stores the recording metadata and provides access to the recording
+    stored in Twilio's cloud storage.
+    
+    Access Control:
+    - Patients can access their own recordings
+    - Psychologists can access recordings of their sessions
+    - Practice managers can access all recordings (for QA)
+    - Admins have full access
+    """
+    
+    appointment = models.ForeignKey(
+        Appointment,
+        on_delete=models.CASCADE,
+        related_name='recordings',
+        help_text="Appointment this recording belongs to"
+    )
+    
+    # Twilio recording identifiers
+    recording_sid = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="Twilio recording SID (unique identifier)"
+    )
+    
+    # Recording metadata
+    media_uri = models.URLField(
+        help_text="Twilio URL to access the recording"
+    )
+    media_external_location = models.URLField(
+        blank=True,
+        null=True,
+        help_text="External storage location (if applicable)"
+    )
+    
+    # Recording details
+    duration = models.PositiveIntegerField(
+        help_text="Recording duration in seconds"
+    )
+    size = models.PositiveIntegerField(
+        help_text="Recording file size in bytes"
+    )
+    
+    # Recording status
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('started', 'Started'),
+            ('completed', 'Completed'),
+            ('failed', 'Failed')
+        ],
+        default='started',
+        help_text="Current status of the recording"
+    )
+    
+    # Participant information (optional)
+    participant_identity = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Participant who was recorded (if applicable)"
+    )
+    
+    # Timestamps
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When recording metadata was created"
+    )
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When recording was completed"
+    )
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Session Recording'
+        verbose_name_plural = 'Session Recordings'
+        indexes = [
+            models.Index(fields=['appointment', '-created_at']),
+            models.Index(fields=['recording_sid']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        return f"Recording {self.recording_sid} - {self.appointment} - {self.status}"
+    
+    @property
+    def duration_formatted(self):
+        """Return duration in human-readable format"""
+        minutes = self.duration // 60
+        seconds = self.duration % 60
+        return f"{minutes}m {seconds}s"
+    
+    @property
+    def size_formatted(self):
+        """Return file size in human-readable format"""
+        if self.size < 1024:
+            return f"{self.size} B"
+        elif self.size < 1024 * 1024:
+            return f"{self.size / 1024:.2f} KB"
+        else:
+            return f"{self.size / (1024 * 1024):.2f} MB"
             

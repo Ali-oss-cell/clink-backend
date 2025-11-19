@@ -72,4 +72,9 @@ urlpatterns = [
     path('psychologist/schedule/', views.PsychologistScheduleView.as_view(), name='psychologist-schedule'),
     path('complete-session/<int:appointment_id>/', views.CompleteSessionView.as_view(), name='complete-session'),
     path('appointment-actions/<int:appointment_id>/', views.AppointmentActionsView.as_view(), name='appointment-actions'),
+    
+    # Session Recording Access
+    path('<int:appointment_id>/recording/', views.SessionRecordingView.as_view(), name='appointment-recording'),
+    path('recordings/', views.SessionRecordingListView.as_view(), name='session-recordings-list'),
+    path('recordings/<int:recording_id>/download/', views.SessionRecordingDownloadView.as_view(), name='recording-download'),
 ]

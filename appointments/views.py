@@ -14,12 +14,13 @@ from django.db.models import Q, Count
 from django.contrib.auth import get_user_model
 from datetime import datetime
 
-from .models import Appointment, AvailabilitySlot, TimeSlot
+from .models import Appointment, AvailabilitySlot, TimeSlot, SessionRecording
 from .serializers import (
     AppointmentSerializer, AppointmentListSerializer, AppointmentCreateSerializer, AvailabilitySlotSerializer,
     TimeSlotSerializer, BookAppointmentSerializer, AppointmentStatusSerializer,
     PsychologistAvailabilitySerializer, AppointmentSummarySerializer,
-    PatientAppointmentDetailSerializer, PsychologistScheduleSerializer
+    PatientAppointmentDetailSerializer, PsychologistScheduleSerializer,
+    SessionRecordingSerializer, SessionRecordingListSerializer
 )
 from services.models import Service
 from audit.utils import log_action
@@ -519,6 +520,19 @@ class CreateVideoRoomView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
+            # Check recording consent if recording is requested
+            enable_recording = request.data.get('enable_recording', False)
+            if enable_recording:
+                from core.notification_utils import has_recording_consent
+                if not has_recording_consent(appointment.patient):
+                    return Response(
+                        {
+                            'error': 'Patient has not consented to session recording',
+                            'message': 'Recording cannot be enabled without patient consent. Please request consent first.'
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            
             # Get or create video room
             video_service = get_video_service()
             
@@ -534,10 +548,11 @@ class CreateVideoRoomView(APIView):
                         'meeting_url': video_service._generate_meeting_url(appointment.video_room_id)
                     })
             
-            # Create new room
+            # Create new room (with recording enabled only if consent given)
             room_data = video_service.create_room(
                 appointment_id=appointment_id,
-                appointment_date=appointment.appointment_date
+                appointment_date=appointment.appointment_date,
+                enable_recording=enable_recording
             )
             
             # Update appointment with video room ID
@@ -1330,20 +1345,40 @@ class TwilioStatusCallbackView(APIView):
         container = data.get('Container')
         
         if event_type == 'recording-started':
+            from .models import SessionRecording
+            from django.utils import timezone
+            
             logger.info(
                 f"Recording started: {recording_sid} | "
                 f"Room: {room_name} | "
                 f"Participant: {participant_identity} | "
                 f"Track: {track_name} ({codec})"
             )
+            
             if appointment:
-                # You could store recording metadata
-                pass
+                # Store initial recording metadata when recording starts
+                try:
+                    SessionRecording.objects.get_or_create(
+                        recording_sid=recording_sid,
+                        defaults={
+                            'appointment': appointment,
+                            'media_uri': '',  # Will be updated when completed
+                            'duration': 0,
+                            'size': 0,
+                            'status': 'started',
+                            'participant_identity': participant_identity or ''
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Error saving recording start metadata: {str(e)}")
         
         elif event_type == 'recording-completed':
+            from .models import SessionRecording
+            from django.utils import timezone
+            
             media_uri = data.get('MediaUri')
-            duration = data.get('Duration')
-            size = data.get('Size')
+            duration = data.get('Duration', 0)
+            size = data.get('Size', 0)
             media_external_location = data.get('MediaExternalLocation')
             
             logger.info(
@@ -1352,21 +1387,41 @@ class TwilioStatusCallbackView(APIView):
                 f"Size: {size} bytes | "
                 f"Media URI: {media_uri}"
             )
+            
             if appointment:
-                # Store recording URL and metadata
-                # You could save this to a Recording model or appointment notes
-                # Example:
-                # Recording.objects.create(
-                #     appointment=appointment,
-                #     recording_sid=recording_sid,
-                #     media_uri=media_uri,
-                #     duration=duration,
-                #     size=size,
-                #     participant_identity=participant_identity
-                # )
-                pass
+                # Store recording metadata in database
+                try:
+                    recording, created = SessionRecording.objects.get_or_create(
+                        recording_sid=recording_sid,
+                        defaults={
+                            'appointment': appointment,
+                            'media_uri': media_uri,
+                            'media_external_location': media_external_location or '',
+                            'duration': int(duration) if duration else 0,
+                            'size': int(size) if size else 0,
+                            'status': 'completed',
+                            'completed_at': timezone.now(),
+                            'participant_identity': participant_identity or ''
+                        }
+                    )
+                    
+                    # Update if recording already exists
+                    if not created:
+                        recording.media_uri = media_uri
+                        recording.media_external_location = media_external_location or ''
+                        recording.duration = int(duration) if duration else 0
+                        recording.size = int(size) if size else 0
+                        recording.status = 'completed'
+                        recording.completed_at = timezone.now()
+                        recording.save()
+                    
+                    logger.info(f"Recording metadata saved: {recording.id}")
+                except Exception as e:
+                    logger.error(f"Error saving recording metadata: {str(e)}")
         
         elif event_type == 'recording-failed':
+            from .models import SessionRecording
+            
             failed_operation = data.get('FailedOperation')
             logger.error(
                 f"Recording failed: {recording_sid} | "
@@ -1374,8 +1429,17 @@ class TwilioStatusCallbackView(APIView):
                 f"Room: {room_name}"
             )
             if appointment:
-                # Log the failure for troubleshooting
-                pass
+                # Update recording status to failed
+                try:
+                    recording = SessionRecording.objects.filter(
+                        recording_sid=recording_sid
+                    ).first()
+                    if recording:
+                        recording.status = 'failed'
+                        recording.save()
+                        logger.info(f"Recording status updated to failed: {recording.id}")
+                except Exception as e:
+                    logger.error(f"Error updating recording status: {str(e)}")
     
     def _handle_composition_event(self, event_type, data, appointment, logger):
         """Handle composition-related events (video compositions)"""
@@ -2378,3 +2442,210 @@ class AppointmentActionsView(APIView):
             'message': 'Appointment rescheduled successfully',
             'appointment': serializer.data
         })
+
+
+class SessionRecordingView(APIView):
+    """
+    Get recording for a specific appointment
+    
+    GET /api/appointments/{appointment_id}/recording/ - Get recording for appointment
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, appointment_id):
+        """Get recording for appointment"""
+        try:
+            appointment = Appointment.objects.select_related(
+                'patient', 'psychologist'
+            ).get(id=appointment_id)
+            
+            # Check permissions
+            if not (request.user == appointment.patient or 
+                   request.user == appointment.psychologist or 
+                   request.user.is_admin_user() or 
+                   request.user.is_practice_manager()):
+                return Response(
+                    {'error': 'Permission denied. You can only access recordings for your own appointments.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Get recording
+            recording = SessionRecording.objects.filter(
+                appointment=appointment,
+                status='completed'
+            ).order_by('-created_at').first()
+            
+            if not recording:
+                return Response(
+                    {'error': 'No recording found for this appointment'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Log access
+            log_action(
+                user=request.user,
+                action='view_recording',
+                obj=recording,
+                request=request,
+                metadata={
+                    'appointment_id': appointment.id,
+                    'recording_id': recording.id,
+                    'recording_sid': recording.recording_sid
+                }
+            )
+            
+            serializer = SessionRecordingSerializer(recording)
+            return Response(serializer.data)
+        
+        except Appointment.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to retrieve recording: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class SessionRecordingListView(APIView):
+    """
+    List all recordings accessible to the current user
+    
+    GET /api/appointments/recordings/ - List user's recordings
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """List recordings based on user role"""
+        try:
+            # Build query based on user role
+            if request.user.is_patient():
+                # Patients can only see their own recordings
+                recordings = SessionRecording.objects.filter(
+                    appointment__patient=request.user,
+                    status='completed'
+                ).select_related('appointment', 'appointment__patient', 'appointment__psychologist')
+            
+            elif request.user.is_psychologist():
+                # Psychologists can see recordings of their sessions
+                recordings = SessionRecording.objects.filter(
+                    appointment__psychologist=request.user,
+                    status='completed'
+                ).select_related('appointment', 'appointment__patient', 'appointment__psychologist')
+            
+            elif request.user.is_practice_manager() or request.user.is_admin_user():
+                # Practice managers and admins can see all recordings
+                recordings = SessionRecording.objects.filter(
+                    status='completed'
+                ).select_related('appointment', 'appointment__patient', 'appointment__psychologist')
+            
+            else:
+                return Response(
+                    {'error': 'Invalid user role'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Order by most recent first
+            recordings = recordings.order_by('-created_at')
+            
+            # Pagination
+            paginator = PageNumberPagination()
+            paginator.page_size = 20
+            paginated_recordings = paginator.paginate_queryset(recordings, request)
+            
+            serializer = SessionRecordingListSerializer(paginated_recordings, many=True)
+            
+            # Log access
+            log_action(
+                user=request.user,
+                action='list_recordings',
+                request=request,
+                metadata={
+                    'count': len(paginated_recordings) if paginated_recordings else 0,
+                    'role': request.user.role
+                }
+            )
+            
+            return paginator.get_paginated_response(serializer.data)
+        
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to retrieve recordings: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class SessionRecordingDownloadView(APIView):
+    """
+    Get download URL for a recording
+    
+    GET /api/appointments/recordings/{recording_id}/download/ - Get download URL
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, recording_id):
+        """Get download URL for recording"""
+        try:
+            recording = SessionRecording.objects.select_related(
+                'appointment', 'appointment__patient', 'appointment__psychologist'
+            ).get(id=recording_id)
+            
+            appointment = recording.appointment
+            
+            # Check permissions
+            if not (request.user == appointment.patient or 
+                   request.user == appointment.psychologist or 
+                   request.user.is_admin_user() or 
+                   request.user.is_practice_manager()):
+                return Response(
+                    {'error': 'Permission denied. You can only download recordings for your own appointments.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Check if recording is completed
+            if recording.status != 'completed':
+                return Response(
+                    {'error': f'Recording is not available. Status: {recording.status}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Log download access
+            log_action(
+                user=request.user,
+                action='download_recording',
+                obj=recording,
+                request=request,
+                metadata={
+                    'appointment_id': appointment.id,
+                    'recording_id': recording.id,
+                    'recording_sid': recording.recording_sid
+                }
+            )
+            
+            # Return download URL (Twilio media_uri)
+            return Response({
+                'recording_id': recording.id,
+                'appointment_id': appointment.id,
+                'download_url': recording.media_uri,
+                'external_location': recording.media_external_location,
+                'duration': recording.duration,
+                'size': recording.size,
+                'size_formatted': recording.size_formatted,
+                'duration_formatted': recording.duration_formatted,
+                'created_at': recording.created_at,
+                'completed_at': recording.completed_at,
+                'note': 'Use the download_url to access the recording. This URL is provided by Twilio and may require authentication.'
+            })
+        
+        except SessionRecording.DoesNotExist:
+            return Response(
+                {'error': 'Recording not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to retrieve download URL: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

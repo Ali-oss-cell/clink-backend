@@ -5,7 +5,7 @@ Handles appointment booking, availability, and scheduling
 
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Appointment, AvailabilitySlot, TimeSlot
+from .models import Appointment, AvailabilitySlot, TimeSlot, SessionRecording
 from users.models import User
 from services.models import Service
 
@@ -1008,3 +1008,90 @@ class PatientAppointmentDetailSerializer(serializers.ModelSerializer):
         
         # Can join if within join window
         return join_window_start <= now <= end_time
+
+
+class SessionRecordingSerializer(serializers.ModelSerializer):
+    """Serializer for session recording metadata"""
+    
+    appointment_id = serializers.IntegerField(source='appointment.id', read_only=True)
+    patient_name = serializers.SerializerMethodField()
+    psychologist_name = serializers.SerializerMethodField()
+    duration_formatted = serializers.CharField(source='duration_formatted', read_only=True)
+    size_formatted = serializers.CharField(source='size_formatted', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    
+    class Meta:
+        model = SessionRecording
+        fields = [
+            'id',
+            'appointment_id',
+            'recording_sid',
+            'media_uri',
+            'media_external_location',
+            'duration',
+            'duration_formatted',
+            'size',
+            'size_formatted',
+            'status',
+            'status_display',
+            'participant_identity',
+            'created_at',
+            'completed_at',
+            'patient_name',
+            'psychologist_name',
+        ]
+        read_only_fields = [
+            'id', 'recording_sid', 'media_uri', 'media_external_location',
+            'duration', 'size', 'status', 'created_at', 'completed_at'
+        ]
+    
+    def get_patient_name(self, obj):
+        """Get patient name"""
+        if obj.appointment and obj.appointment.patient:
+            return obj.appointment.patient.get_full_name()
+        return None
+    
+    def get_psychologist_name(self, obj):
+        """Get psychologist name"""
+        if obj.appointment and obj.appointment.psychologist:
+            return obj.appointment.psychologist.get_full_name()
+        return None
+
+
+class SessionRecordingListSerializer(serializers.ModelSerializer):
+    """Simplified serializer for listing recordings"""
+    
+    appointment_date = serializers.DateTimeField(source='appointment.appointment_date', read_only=True)
+    patient_name = serializers.SerializerMethodField()
+    psychologist_name = serializers.SerializerMethodField()
+    duration_formatted = serializers.CharField(source='duration_formatted', read_only=True)
+    size_formatted = serializers.CharField(source='size_formatted', read_only=True)
+    
+    class Meta:
+        model = SessionRecording
+        fields = [
+            'id',
+            'recording_sid',
+            'appointment_date',
+            'patient_name',
+            'psychologist_name',
+            'duration',
+            'duration_formatted',
+            'size',
+            'size_formatted',
+            'status',
+            'created_at',
+            'completed_at',
+        ]
+    
+    def get_patient_name(self, obj):
+        """Get patient name"""
+        if obj.appointment and obj.appointment.patient:
+            return obj.appointment.patient.get_full_name()
+        return None
+    
+    def get_psychologist_name(self, obj):
+        """Get psychologist name"""
+        if obj.appointment and obj.appointment.psychologist:
+            return obj.appointment.psychologist.get_full_name()
+        return None
