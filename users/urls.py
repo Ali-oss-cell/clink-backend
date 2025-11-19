@@ -34,9 +34,17 @@ urlpatterns = [
     
     # Privacy & Consent Compliance (Privacy Act 1988)
     path('privacy-policy/', views.PrivacyPolicyAcceptanceView.as_view(), name='privacy-policy'),
+    path('telehealth-consent/', views.TelehealthConsentView.as_view(), name='telehealth-consent'),
+    path('third-party-data-sharing/', views.ThirdPartyDataSharingView.as_view(), name='third-party-data-sharing'),
     path('consent/withdraw/', views.ConsentWithdrawalView.as_view(), name='consent-withdraw'),
     path('data-access-request/', views.DataAccessRequestView.as_view(), name='data-access-request'),
     path('data-access-request', views.DataAccessRequestView.as_view(), name='data-access-request-no-slash'),  # Without trailing slash
+    
+    # Data Deletion Request (APP 13)
+    path('data-deletion-request/', views.DataDeletionRequestView.as_view(), name='data-deletion-request'),
+    path('data-deletion-request/<int:request_id>/cancel/', views.DataDeletionRequestCancelView.as_view(), name='data-deletion-request-cancel'),
+    path('data-deletion-requests/', views.DataDeletionRequestListView.as_view(), name='data-deletion-requests-list'),
+    path('data-deletion-requests/<int:request_id>/review/', views.DataDeletionRequestReviewView.as_view(), name='data-deletion-request-review'),
     
     # Intake Forms
     path('intake-form/', views.IntakeFormView.as_view(), name='intake-form'),

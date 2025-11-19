@@ -18,7 +18,7 @@ from django.db import models  # type: ignore
 from django.utils import timezone  # type: ignore
 from datetime import timedelta  # type: ignore
 
-from .models import PatientProfile, ProgressNote
+from .models import PatientProfile, ProgressNote, DataDeletionRequest
 from appointments.models import Appointment
 from audit.utils import log_action
 
@@ -42,7 +42,8 @@ except ImportError:
 from .serializers import (
     UserSerializer, UserUpdateSerializer, PatientRegistrationSerializer, PatientProfileSerializer,
     IntakeFormSerializer, ProgressNoteSerializer, ProgressNoteCreateSerializer,
-    PsychologistDashboardSerializer, PatientDashboardSerializer
+    PsychologistDashboardSerializer, PatientDashboardSerializer,
+    DataDeletionRequestSerializer, DataDeletionRequestCreateSerializer
 )
 
 User = get_user_model()
@@ -2226,6 +2227,14 @@ class PrivacyPolicyAcceptanceView(APIView):
             latest_version = getattr(settings, 'PRIVACY_POLICY_VERSION', '1.0')
             policy_url = getattr(settings, 'PRIVACY_POLICY_URL', 'https://yourclinic.com.au/privacy-policy')
             
+            # Get third-party data sharing information
+            third_party_sharing = getattr(settings, 'THIRD_PARTY_DATA_SHARING', {})
+            # Filter to only show active services
+            active_third_parties = {
+                key: value for key, value in third_party_sharing.items() 
+                if value.get('active', False)
+            }
+            
             return Response({
                 'accepted': patient_profile.privacy_policy_accepted if patient_profile else False,
                 'accepted_date': patient_profile.privacy_policy_accepted_date.isoformat() if patient_profile and patient_profile.privacy_policy_accepted_date else None,
@@ -2236,7 +2245,8 @@ class PrivacyPolicyAcceptanceView(APIView):
                     if patient_profile and patient_profile.privacy_policy_version 
                     else True
                 ),
-                'privacy_policy_url': policy_url
+                'privacy_policy_url': policy_url,
+                'third_party_data_sharing': active_third_parties
             })
         except Exception as e:
             # Log the error for debugging
@@ -2254,6 +2264,108 @@ class PrivacyPolicyAcceptanceView(APIView):
                 'privacy_policy_url': getattr(settings, 'PRIVACY_POLICY_URL', 'https://yourclinic.com.au/privacy-policy'),
                 'error': 'An error occurred while retrieving Privacy Policy status'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class TelehealthConsentView(APIView):
+    """
+    Telehealth Consent (Telehealth compliance - emergency & recording)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get telehealth consent status"""
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can view telehealth consent status'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        patient_profile, _ = PatientProfile.objects.get_or_create(user=request.user)
+        from django.conf import settings
+        latest_version = getattr(settings, 'TELEHEALTH_CONSENT_VERSION', '1.0')
+        recording_version = getattr(settings, 'TELEHEALTH_RECORDING_CONSENT_VERSION', '1.0')
+        requirements_url = getattr(settings, 'TELEHEALTH_REQUIREMENTS_URL', 'https://yourclinic.com.au/telehealth-requirements')
+        
+        return Response({
+            'consent_to_telehealth': patient_profile.consent_to_telehealth,
+            'telehealth_consent_date': patient_profile.consent_to_telehealth_date.isoformat() if patient_profile.consent_to_telehealth_date else None,
+            'telehealth_consent_version': patient_profile.consent_to_telehealth_version,
+            'latest_version': latest_version,
+            'needs_update': (
+                patient_profile.consent_to_telehealth_version != latest_version
+                if patient_profile.consent_to_telehealth_version else True
+            ),
+            'telehealth_requirements_url': requirements_url,
+            'telehealth_emergency_protocol_acknowledged': patient_profile.telehealth_emergency_protocol_acknowledged,
+            'telehealth_emergency_acknowledged_date': patient_profile.telehealth_emergency_acknowledged_date.isoformat() if patient_profile.telehealth_emergency_acknowledged_date else None,
+            'telehealth_emergency_contact': patient_profile.telehealth_emergency_contact,
+            'telehealth_emergency_plan': patient_profile.telehealth_emergency_plan,
+            'telehealth_tech_requirements_acknowledged': patient_profile.telehealth_tech_requirements_acknowledged,
+            'telehealth_tech_acknowledged_date': patient_profile.telehealth_tech_acknowledged_date.isoformat() if patient_profile.telehealth_tech_acknowledged_date else None,
+            'telehealth_recording_consent': patient_profile.telehealth_recording_consent,
+            'telehealth_recording_consent_date': patient_profile.telehealth_recording_consent_date.isoformat() if patient_profile.telehealth_recording_consent_date else None,
+            'telehealth_recording_consent_version': patient_profile.telehealth_recording_consent_version or recording_version
+        })
+    
+    def post(self, request):
+        """Accept telehealth consent"""
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can update telehealth consent'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        patient_profile, _ = PatientProfile.objects.get_or_create(user=request.user)
+        data = request.data
+        required_fields = [
+            'consent_to_telehealth',
+            'telehealth_emergency_protocol_acknowledged',
+            'telehealth_emergency_contact',
+            'telehealth_emergency_plan',
+            'telehealth_tech_requirements_acknowledged'
+        ]
+        
+        for field in required_fields:
+            if field not in data:
+                return Response({'error': f'{field} is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not data.get('consent_to_telehealth'):
+            return Response({'error': 'Telehealth consent must be granted'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        from django.conf import settings
+        now = timezone.now()
+        
+        patient_profile.consent_to_telehealth = True
+        if not patient_profile.consent_to_telehealth_date:
+            patient_profile.consent_to_telehealth_date = now
+        patient_profile.consent_to_telehealth_version = getattr(settings, 'TELEHEALTH_CONSENT_VERSION', '1.0')
+        
+        patient_profile.telehealth_emergency_protocol_acknowledged = bool(data.get('telehealth_emergency_protocol_acknowledged'))
+        patient_profile.telehealth_emergency_acknowledged_date = now if patient_profile.telehealth_emergency_protocol_acknowledged else None
+        patient_profile.telehealth_emergency_contact = data.get('telehealth_emergency_contact', '')
+        patient_profile.telehealth_emergency_plan = data.get('telehealth_emergency_plan', '')
+        
+        patient_profile.telehealth_tech_requirements_acknowledged = bool(data.get('telehealth_tech_requirements_acknowledged'))
+        patient_profile.telehealth_tech_acknowledged_date = now if patient_profile.telehealth_tech_requirements_acknowledged else None
+        
+        recording_consent = bool(data.get('telehealth_recording_consent', False))
+        patient_profile.telehealth_recording_consent = recording_consent
+        if recording_consent:
+            patient_profile.telehealth_recording_consent_date = now
+            patient_profile.telehealth_recording_consent_version = getattr(settings, 'TELEHEALTH_RECORDING_CONSENT_VERSION', '1.0')
+        else:
+            patient_profile.telehealth_recording_consent_date = None
+            patient_profile.telehealth_recording_consent_version = ''
+        
+        patient_profile.save()
+        
+        return Response({
+            'message': 'Telehealth consent updated successfully',
+            'consent_to_telehealth': patient_profile.consent_to_telehealth,
+            'telehealth_emergency_protocol_acknowledged': patient_profile.telehealth_emergency_protocol_acknowledged,
+            'telehealth_tech_requirements_acknowledged': patient_profile.telehealth_tech_requirements_acknowledged,
+            'telehealth_recording_consent': patient_profile.telehealth_recording_consent
+        }, status=status.HTTP_200_OK)
 
 
 class ConsentWithdrawalView(APIView):
@@ -2883,3 +2995,389 @@ class DataAccessRequestView(APIView):
                 {'error': 'Error generating CSV. Please try JSON format.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class DataDeletionRequestView(APIView):
+    """
+    Data Deletion Request (Privacy Act 1988 - APP 13 compliance)
+    
+    Allows patients to request deletion of their personal information.
+    Uses soft delete/archiving to comply with legal retention requirements.
+    
+    Endpoints:
+    - POST /api/auth/data-deletion-request/ - Create deletion request (patient)
+    - GET /api/auth/data-deletion-request/ - Get patient's deletion request status
+    - DELETE /api/auth/data-deletion-request/{id}/ - Cancel deletion request (patient)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Create a new data deletion request (patient only)"""
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can request data deletion'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        serializer = DataDeletionRequestCreateSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+        
+        if serializer.is_valid():
+            deletion_request = serializer.save()
+            
+            # Log the action
+            try:
+                log_action(
+                    user=request.user,
+                    action='data_deletion_request',
+                    obj=deletion_request,
+                    request=request,
+                    metadata={
+                        'request_id': deletion_request.id,
+                        'reason': deletion_request.reason,
+                        'earliest_deletion_date': deletion_request.earliest_deletion_date.isoformat() if deletion_request.earliest_deletion_date else None,
+                        'retention_period_years': deletion_request.retention_period_years
+                    }
+                )
+            except Exception as log_error:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f'Failed to log deletion request: {str(log_error)}')
+            
+            response_serializer = DataDeletionRequestSerializer(deletion_request)
+            return Response(
+                {
+                    'message': 'Data deletion request submitted successfully',
+                    'request': response_serializer.data,
+                    'note': f'Your data will be eligible for deletion on {deletion_request.earliest_deletion_date.strftime("%Y-%m-%d") if deletion_request.earliest_deletion_date else "N/A"}. '
+                            f'An admin will review your request.'
+                },
+                status=status.HTTP_201_CREATED
+            )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def get(self, request):
+        """Get patient's deletion request status"""
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can view their deletion requests'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        deletion_request = DataDeletionRequest.objects.filter(
+            patient=request.user
+        ).order_by('-request_date').first()
+
+        # Treat cancelled requests as no active request so patients can start a new one
+        if not deletion_request or deletion_request.status == DataDeletionRequest.RequestStatus.CANCELLED:
+            return Response({
+                'message': 'No deletion request found',
+                'has_request': False
+            })
+        
+        serializer = DataDeletionRequestSerializer(deletion_request)
+        return Response({
+            'message': 'Deletion request found',
+            'has_request': True,
+            'request': serializer.data
+        })
+
+
+class DataDeletionRequestCancelView(APIView):
+    """Cancel a pending deletion request (patient only)"""
+    permission_classes = [IsAuthenticated]
+    
+    def delete(self, request, request_id):
+        """Cancel a deletion request"""
+        if not request.user.is_patient():
+            return Response(
+                {'error': 'Only patients can cancel their deletion requests'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            deletion_request = DataDeletionRequest.objects.get(
+                id=request_id,
+                patient=request.user
+            )
+        except DataDeletionRequest.DoesNotExist:
+            return Response(
+                {'error': 'Deletion request not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Only allow cancellation if pending or approved (not completed)
+        if deletion_request.status == DataDeletionRequest.RequestStatus.COMPLETED:
+            return Response(
+                {'error': 'Cannot cancel a completed deletion request'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if deletion_request.status == DataDeletionRequest.RequestStatus.CANCELLED:
+            return Response(
+                {'error': 'Deletion request is already cancelled'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        deletion_request.status = DataDeletionRequest.RequestStatus.CANCELLED
+        deletion_request.save()
+        
+        # Log the action
+        try:
+            log_action(
+                user=request.user,
+                action='data_deletion_request_cancelled',
+                obj=deletion_request,
+                request=request,
+                metadata={
+                    'request_id': deletion_request.id,
+                    'previous_status': deletion_request.status
+                }
+            )
+        except Exception as log_error:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f'Failed to log deletion request cancellation: {str(log_error)}')
+        
+        return Response({
+            'message': 'Deletion request cancelled successfully',
+            'request_id': deletion_request.id
+        })
+
+
+class DataDeletionRequestListView(APIView):
+    """
+    List all data deletion requests (admin/practice manager only)
+    
+    GET /api/auth/data-deletion-requests/ - List all requests
+    Query parameters:
+    - status: Filter by status (pending, approved, rejected, completed, cancelled)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """List all deletion requests"""
+        if not (request.user.is_admin_user() or request.user.is_practice_manager()):
+            return Response(
+                {'error': 'Only admins and practice managers can view deletion requests'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Filter by status if provided
+        status_filter = request.query_params.get('status')
+        queryset = DataDeletionRequest.objects.all()
+        
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        queryset = queryset.order_by('-request_date')
+        
+        serializer = DataDeletionRequestSerializer(queryset, many=True)
+        return Response({
+            'count': queryset.count(),
+            'requests': serializer.data
+        })
+
+
+class DataDeletionRequestReviewView(APIView):
+    """
+    Review a data deletion request (admin/practice manager only)
+    
+    POST /api/auth/data-deletion-requests/{id}/review/
+    Body:
+    {
+        "action": "approve" or "reject",
+        "rejection_reason": "legal_retention" (if rejecting),
+        "rejection_notes": "Additional notes",
+        "notes": "Internal notes"
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, request_id):
+        """Review (approve or reject) a deletion request"""
+        if not (request.user.is_admin_user() or request.user.is_practice_manager()):
+            return Response(
+                {'error': 'Only admins and practice managers can review deletion requests'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            deletion_request = DataDeletionRequest.objects.get(id=request_id)
+        except DataDeletionRequest.DoesNotExist:
+            return Response(
+                {'error': 'Deletion request not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        action = request.data.get('action', '').lower()
+        
+        if action not in ['approve', 'reject']:
+            return Response(
+                {'error': 'Action must be "approve" or "reject"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if request can be approved
+        if action == 'approve':
+            # Check for blocking conditions
+            patient = deletion_request.patient
+            errors = []
+            
+            # Check for active appointments
+            if SERVICES_AVAILABLE:
+                active_appointments = Appointment.objects.filter(
+                    patient=patient,
+                    status__in=['scheduled', 'confirmed']
+                ).exists()
+                if active_appointments:
+                    errors.append('Patient has active or upcoming appointments')
+            
+            # Check for unpaid invoices
+            if BILLING_AVAILABLE and Invoice:
+                unpaid_invoices = Invoice.objects.filter(
+                    patient=patient,
+                    status__in=['pending', 'overdue']
+                ).exists()
+                if unpaid_invoices:
+                    errors.append('Patient has unpaid invoices')
+            
+            if errors:
+                return Response(
+                    {
+                        'error': 'Cannot approve deletion request',
+                        'reasons': errors,
+                        'suggestion': 'Please resolve these issues before approving deletion'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check retention policy
+            if not deletion_request.earliest_deletion_date:
+                deletion_request.calculate_earliest_deletion_date()
+            
+            can_delete_now = deletion_request.can_be_deleted_now()
+            
+            deletion_request.status = DataDeletionRequest.RequestStatus.APPROVED
+            deletion_request.reviewed_by = request.user
+            deletion_request.reviewed_date = timezone.now()
+            deletion_request.notes = request.data.get('notes', '')
+            
+            if can_delete_now:
+                # Can delete immediately
+                deletion_request.scheduled_deletion_date = timezone.now()
+            else:
+                # Schedule for future deletion
+                deletion_request.scheduled_deletion_date = deletion_request.earliest_deletion_date
+            
+            deletion_request.save()
+            
+            # Log the action
+            try:
+                log_action(
+                    user=request.user,
+                    action='data_deletion_request_approved',
+                    obj=deletion_request,
+                    request=request,
+                    metadata={
+                        'request_id': deletion_request.id,
+                        'patient_id': patient.id,
+                        'scheduled_deletion_date': deletion_request.scheduled_deletion_date.isoformat() if deletion_request.scheduled_deletion_date else None,
+                        'can_delete_now': can_delete_now
+                    }
+                )
+            except Exception as log_error:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f'Failed to log deletion request approval: {str(log_error)}')
+            
+            return Response({
+                'message': 'Deletion request approved',
+                'request': DataDeletionRequestSerializer(deletion_request).data,
+                'scheduled_deletion_date': deletion_request.scheduled_deletion_date.isoformat() if deletion_request.scheduled_deletion_date else None,
+                'note': 'Data will be archived on the scheduled date. A Celery task will process the deletion.'
+            })
+        
+        elif action == 'reject':
+            rejection_reason = request.data.get('rejection_reason', '')
+            rejection_notes = request.data.get('rejection_notes', '')
+            
+            if not rejection_reason:
+                return Response(
+                    {'error': 'Rejection reason is required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            if rejection_reason not in [choice[0] for choice in DataDeletionRequest.RejectionReason.choices]:
+                return Response(
+                    {'error': 'Invalid rejection reason'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            deletion_request.status = DataDeletionRequest.RequestStatus.REJECTED
+            deletion_request.reviewed_by = request.user
+            deletion_request.reviewed_date = timezone.now()
+            deletion_request.rejection_reason = rejection_reason
+            deletion_request.rejection_notes = rejection_notes
+            deletion_request.notes = request.data.get('notes', '')
+            deletion_request.save()
+            
+            # Log the action
+            try:
+                log_action(
+                    user=request.user,
+                    action='data_deletion_request_rejected',
+                    obj=deletion_request,
+                    request=request,
+                    metadata={
+                        'request_id': deletion_request.id,
+                        'patient_id': deletion_request.patient.id,
+                        'rejection_reason': rejection_reason,
+                        'rejection_notes': rejection_notes
+                    }
+                )
+            except Exception as log_error:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f'Failed to log deletion request rejection: {str(log_error)}')
+            
+            return Response({
+                'message': 'Deletion request rejected',
+                'request': DataDeletionRequestSerializer(deletion_request).data
+            })
+
+
+class ThirdPartyDataSharingView(APIView):
+    """
+    Third-Party Data Sharing Disclosure (Privacy Act 1988 - APP 8)
+    
+    Returns information about third-party services that receive patient data.
+    This is required disclosure under APP 8 (Cross-border disclosure).
+    
+    GET /api/auth/third-party-data-sharing/ - Get third-party data sharing information
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get third-party data sharing disclosure information"""
+        from django.conf import settings
+        
+        # Get third-party data sharing configuration
+        third_party_sharing = getattr(settings, 'THIRD_PARTY_DATA_SHARING', {})
+        
+        # Filter to only show active services
+        active_third_parties = {
+            key: value for key, value in third_party_sharing.items() 
+            if value.get('active', False)
+        }
+        
+        return Response({
+            'message': 'Third-party data sharing disclosure',
+            'disclosure_date': timezone.now().isoformat(),
+            'third_parties': active_third_parties,
+            'total_active_services': len(active_third_parties),
+            'note': 'This information is provided in accordance with Australian Privacy Act 1988 - APP 8 (Cross-border disclosure). All third-party services are required to have appropriate safeguards in place to protect your data.'
+        })

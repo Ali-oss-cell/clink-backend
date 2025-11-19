@@ -42,6 +42,18 @@ app.conf.beat_schedule = {
         'task': 'appointments.tasks.check_ahpra_expiry',
         'schedule': 2592000.0,  # Run monthly (30 days = 2,592,000 seconds)
     },
+    'check-insurance-expiry': {
+        'task': 'appointments.tasks.check_insurance_expiry',
+        'schedule': 2592000.0,  # Run monthly (30 days = 2,592,000 seconds)
+    },
+    'process-approved-deletion-requests': {
+        'task': 'users.tasks.process_approved_deletion_requests',
+        'schedule': 86400.0,  # Run daily (24 hours = 86,400 seconds)
+    },
+    'check-deletion-requests-ready': {
+        'task': 'users.tasks.check_deletion_requests_ready',
+        'schedule': 86400.0,  # Run daily (24 hours = 86,400 seconds)
+    },
 }
 
 app.conf.timezone = settings.TIME_ZONE

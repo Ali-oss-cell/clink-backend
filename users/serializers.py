@@ -6,7 +6,7 @@ Supports intake forms, progress notes, and role-based data access
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from .models import PatientProfile, ProgressNote
+from .models import PatientProfile, ProgressNote, DataDeletionRequest
 
 User = get_user_model()
 
@@ -298,6 +298,11 @@ class PatientProfileSerializer(serializers.ModelSerializer):
             # Consent fields
             'consent_to_treatment', 'consent_to_treatment_date', 'consent_to_treatment_version',
             'consent_to_telehealth', 'consent_to_telehealth_date', 'consent_to_telehealth_version',
+            'telehealth_emergency_protocol_acknowledged', 'telehealth_emergency_acknowledged_date',
+            'telehealth_emergency_contact', 'telehealth_emergency_plan',
+            'telehealth_tech_requirements_acknowledged', 'telehealth_tech_acknowledged_date',
+            'telehealth_recording_consent', 'telehealth_recording_consent_date',
+            'telehealth_recording_consent_version',
             # Privacy Policy compliance
             'privacy_policy_accepted', 'privacy_policy_accepted_date', 'privacy_policy_version',
             'consent_to_data_sharing', 'consent_to_data_sharing_date',
@@ -351,6 +356,11 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             # Consent fields
             'consent_to_treatment', 'consent_to_treatment_date', 'consent_to_treatment_version',
             'consent_to_telehealth', 'consent_to_telehealth_date', 'consent_to_telehealth_version',
+            'telehealth_emergency_protocol_acknowledged', 'telehealth_emergency_acknowledged_date',
+            'telehealth_emergency_contact', 'telehealth_emergency_plan',
+            'telehealth_tech_requirements_acknowledged', 'telehealth_tech_acknowledged_date',
+            'telehealth_recording_consent', 'telehealth_recording_consent_date',
+            'telehealth_recording_consent_version',
             # Privacy Policy compliance
             'privacy_policy_accepted', 'privacy_policy_accepted_date', 'privacy_policy_version',
             'consent_to_data_sharing', 'consent_to_data_sharing_date',
@@ -425,6 +435,19 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             validated_data['consent_to_telehealth_date'] = timezone.now()
             validated_data['consent_to_telehealth_version'] = getattr(settings, 'TELEHEALTH_CONSENT_VERSION', '1.0')
         
+        # Telehealth emergency protocol acknowledgement
+        if validated_data.get('telehealth_emergency_protocol_acknowledged') and not instance.telehealth_emergency_protocol_acknowledged:
+            validated_data['telehealth_emergency_acknowledged_date'] = timezone.now()
+        
+        # Telehealth technical requirements acknowledgement
+        if validated_data.get('telehealth_tech_requirements_acknowledged') and not instance.telehealth_tech_requirements_acknowledged:
+            validated_data['telehealth_tech_acknowledged_date'] = timezone.now()
+        
+        # Telehealth recording consent
+        if validated_data.get('telehealth_recording_consent') and not instance.telehealth_recording_consent:
+            validated_data['telehealth_recording_consent_date'] = timezone.now()
+            validated_data['telehealth_recording_consent_version'] = getattr(settings, 'TELEHEALTH_RECORDING_CONSENT_VERSION', '1.0')
+        
         # Handle data sharing consent
         if validated_data.get('consent_to_data_sharing') and not instance.consent_to_data_sharing:
             validated_data['consent_to_data_sharing_date'] = timezone.now()
@@ -439,6 +462,13 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             # When consent is withdrawn, set all consent flags to False
             validated_data['consent_to_treatment'] = False
             validated_data['consent_to_telehealth'] = False
+            validated_data['telehealth_emergency_protocol_acknowledged'] = False
+            validated_data['telehealth_emergency_acknowledged_date'] = None
+            validated_data['telehealth_tech_requirements_acknowledged'] = False
+            validated_data['telehealth_tech_acknowledged_date'] = None
+            validated_data['telehealth_recording_consent'] = False
+            validated_data['telehealth_recording_consent_date'] = None
+            validated_data['telehealth_recording_consent_version'] = ''
             validated_data['consent_to_data_sharing'] = False
             validated_data['consent_to_marketing'] = False
         
@@ -579,3 +609,78 @@ class PatientDashboardSerializer(serializers.Serializer):
     intake_completed = serializers.BooleanField()
     outstanding_invoices = serializers.IntegerField()
     recent_progress = serializers.ListField()
+
+
+class DataDeletionRequestSerializer(serializers.ModelSerializer):
+    """Serializer for data deletion requests (APP 13)"""
+    
+    patient_name = serializers.SerializerMethodField()
+    patient_email = serializers.SerializerMethodField()
+    reviewed_by_name = serializers.SerializerMethodField()
+    can_be_deleted_now = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = DataDeletionRequest
+        fields = [
+            'id', 'patient', 'patient_name', 'patient_email',
+            'request_date', 'reason', 'status',
+            'reviewed_by', 'reviewed_by_name', 'reviewed_date',
+            'rejection_reason', 'rejection_notes',
+            'scheduled_deletion_date', 'deletion_completed_date',
+            'retention_period_years', 'earliest_deletion_date',
+            'can_be_deleted_now', 'notes',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'request_date', 'reviewed_by', 'reviewed_date',
+            'scheduled_deletion_date', 'deletion_completed_date',
+            'earliest_deletion_date', 'created_at', 'updated_at'
+        ]
+    
+    def get_patient_name(self, obj):
+        return obj.patient.get_full_name() if obj.patient else None
+    
+    def get_patient_email(self, obj):
+        return obj.patient.email if obj.patient else None
+    
+    def get_reviewed_by_name(self, obj):
+        return obj.reviewed_by.get_full_name() if obj.reviewed_by else None
+    
+    def get_can_be_deleted_now(self, obj):
+        return obj.can_be_deleted_now()
+
+
+class DataDeletionRequestCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating data deletion requests (patient use)"""
+    
+    class Meta:
+        model = DataDeletionRequest
+        fields = ['reason']
+    
+    def create(self, validated_data):
+        """Create deletion request for the authenticated patient"""
+        request = self.context.get('request')
+        if not request or not request.user.is_patient():
+            raise serializers.ValidationError('Only patients can request data deletion')
+        
+        # Check if there's already a pending request
+        existing_request = DataDeletionRequest.objects.filter(
+            patient=request.user,
+            status__in=[DataDeletionRequest.RequestStatus.PENDING, DataDeletionRequest.RequestStatus.APPROVED]
+        ).first()
+        
+        if existing_request:
+            raise serializers.ValidationError(
+                f'You already have a {existing_request.get_status_display().lower()} deletion request. '
+                f'Request ID: {existing_request.id}'
+            )
+        
+        # Calculate earliest deletion date
+        deletion_request = DataDeletionRequest.objects.create(
+            patient=request.user,
+            **validated_data
+        )
+        deletion_request.calculate_earliest_deletion_date()
+        deletion_request.save()
+        
+        return deletion_request

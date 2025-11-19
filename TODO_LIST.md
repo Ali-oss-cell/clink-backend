@@ -22,6 +22,8 @@
 - Billing System (0%)
 - Resources System (0%)
 - Third-party Integrations (0%)
+- Privacy Policy publication (TODO)
+- Production DB encryption (TODO)
 
 ---
 

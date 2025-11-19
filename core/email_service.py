@@ -728,3 +728,172 @@ Psychology Clinic Team
             'error': str(e)
         }
 
+
+def send_insurance_expiry_warning_email(profile, days_until_expiry):
+    """
+    Send Professional Indemnity Insurance expiry warning email to psychologist
+    
+    Args:
+        profile: PsychologistProfile instance
+        days_until_expiry: Number of days until insurance expires
+    
+    Returns:
+        dict: Email send result
+    """
+    psychologist = profile.user
+    
+    subject = f"⚠️ Professional Indemnity Insurance Expiring Soon - {days_until_expiry} Days Remaining"
+    
+    expiry_date = profile.insurance_expiry_date.strftime('%B %d, %Y') if profile.insurance_expiry_date else 'N/A'
+    coverage_amount = f"${profile.insurance_coverage_amount:,.2f} AUD" if profile.insurance_coverage_amount else 'N/A'
+    
+    message = f"""
+Dear {psychologist.get_full_name()},
+
+This is an important reminder that your Professional Indemnity Insurance is expiring soon.
+
+Insurance Details:
+------------------
+Provider: {profile.insurance_provider_name or 'N/A'}
+Policy Number: {profile.insurance_policy_number or 'N/A'}
+Expiry Date: {expiry_date}
+Days Remaining: {days_until_expiry}
+Coverage Amount: {coverage_amount}
+
+Action Required:
+----------------
+Please renew your Professional Indemnity Insurance before the expiry date to continue practicing.
+
+It is a legal requirement for all practicing psychologists to maintain current Professional Indemnity Insurance coverage.
+
+Steps to Renew:
+1. Contact your insurance provider to renew your policy
+2. Upload the new insurance certificate to your profile
+3. Update the expiry date in your profile
+4. Contact the practice manager if you need assistance
+
+If you have any questions, please contact the practice manager.
+
+Thank you,
+Psychology Clinic Team
+"""
+    
+    try:
+        result = send_email_via_sendgrid(
+            to_email=psychologist.email,
+            subject=subject,
+            message=message
+        )
+        
+        result['subject'] = subject
+        return result
+    
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def send_insurance_expired_email(profile, notify_manager=False, manager=None):
+    """
+    Send Professional Indemnity Insurance expired notification email
+    
+    Args:
+        profile: PsychologistProfile instance
+        notify_manager: If True, send to practice manager instead of psychologist
+        manager: Practice manager User instance (if notify_manager=True)
+    
+    Returns:
+        dict: Email send result
+    """
+    psychologist = profile.user
+    expiry_date = profile.insurance_expiry_date.strftime('%B %d, %Y') if profile.insurance_expiry_date else 'N/A'
+    
+    if notify_manager and manager:
+        # Email to practice manager
+        subject = f"🚨 Professional Indemnity Insurance Expired - {psychologist.get_full_name()}"
+        recipient = manager.email
+        
+        message = f"""
+Dear {manager.get_full_name()},
+
+This is to notify you that a psychologist's Professional Indemnity Insurance has expired.
+
+Psychologist Details:
+---------------------
+Name: {psychologist.get_full_name()}
+Email: {psychologist.email}
+Provider: {profile.insurance_provider_name or 'N/A'}
+Policy Number: {profile.insurance_policy_number or 'N/A'}
+Expiry Date: {expiry_date}
+
+Action Required:
+----------------
+The psychologist has been suspended from seeing patients until insurance is renewed.
+
+Please contact the psychologist immediately to:
+1. Confirm insurance renewal status
+2. Update their profile with new insurance details
+3. Reactivate their account once insurance is confirmed
+
+This is a critical compliance issue that must be resolved immediately.
+
+Thank you,
+Psychology Clinic Team
+"""
+    else:
+        # Email to psychologist
+        subject = f"🚨 Professional Indemnity Insurance Expired - Action Required"
+        recipient = psychologist.email
+        
+        message = f"""
+Dear {psychologist.get_full_name()},
+
+URGENT: Your Professional Indemnity Insurance has expired.
+
+Insurance Details:
+------------------
+Provider: {profile.insurance_provider_name or 'N/A'}
+Policy Number: {profile.insurance_policy_number or 'N/A'}
+Expiry Date: {expiry_date}
+
+Your Account Status:
+--------------------
+Your account has been suspended. You cannot see patients until your insurance is renewed.
+
+Action Required IMMEDIATELY:
+----------------------------
+1. Renew your Professional Indemnity Insurance immediately
+2. Contact the practice manager
+3. Upload the new insurance certificate to your profile
+4. Update your profile with the new insurance expiry date
+5. Your account will be reactivated once insurance is confirmed
+
+You cannot see patients until your Professional Indemnity Insurance is renewed and your account is reactivated.
+
+If you have already renewed your insurance, please contact the practice manager immediately to update your profile.
+
+If you have any questions, please contact the practice manager.
+
+Thank you,
+Psychology Clinic Team
+"""
+    
+    try:
+        result = send_email_via_sendgrid(
+            to_email=recipient,
+            subject=subject,
+            message=message
+        )
+        
+        result['subject'] = subject
+        result['notify_manager'] = notify_manager
+        return result
+    
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
+

@@ -351,6 +351,54 @@ PRIVACY_POLICY_VERSION = config('PRIVACY_POLICY_VERSION', default='1.0')
 PRIVACY_POLICY_URL = config('PRIVACY_POLICY_URL', default='https://yourclinic.com.au/privacy-policy')
 CONSENT_FORM_VERSION = config('CONSENT_FORM_VERSION', default='1.0')
 TELEHEALTH_CONSENT_VERSION = config('TELEHEALTH_CONSENT_VERSION', default='1.0')
+TELEHEALTH_RECORDING_CONSENT_VERSION = config('TELEHEALTH_RECORDING_CONSENT_VERSION', default='1.0')
+TELEHEALTH_REQUIREMENTS_URL = config('TELEHEALTH_REQUIREMENTS_URL', default='https://yourclinic.com.au/telehealth-requirements')
+
+# Third-Party Data Sharing Disclosure (Privacy Act 1988 - APP 8)
+# This documents all third-party services that receive patient data
+THIRD_PARTY_DATA_SHARING = {
+    'twilio': {
+        'name': 'Twilio Inc.',
+        'purpose': 'Video calls and SMS/WhatsApp notifications',
+        'data_shared': ['name', 'phone_number', 'email_address'],
+        'location': 'United States',
+        'privacy_policy_url': 'https://www.twilio.com/legal/privacy',
+        'safeguards': [
+            'Encrypted transmission (TLS/SSL)',
+            'GDPR compliant',
+            'SOC 2 Type II certified',
+            'Data processing agreements in place'
+        ],
+        'active': bool(TWILIO_ACCOUNT_SID),  # Only active if configured
+    },
+    'stripe': {
+        'name': 'Stripe, Inc.',
+        'purpose': 'Payment processing',
+        'data_shared': ['name', 'email_address', 'payment_card_information'],
+        'location': 'United States',
+        'privacy_policy_url': 'https://stripe.com/au/privacy',
+        'safeguards': [
+            'PCI DSS Level 1 compliant',
+            'Encrypted transmission (TLS/SSL)',
+            'Tokenization of payment data',
+            'No storage of full card numbers'
+        ],
+        'active': bool(STRIPE_SECRET_KEY),  # Only active if configured
+    },
+    'sendgrid': {
+        'name': 'SendGrid (via Twilio)',
+        'purpose': 'Email delivery for appointment reminders and notifications',
+        'data_shared': ['email_address', 'name'],
+        'location': 'United States',
+        'privacy_policy_url': 'https://www.twilio.com/legal/privacy',
+        'safeguards': [
+            'Encrypted transmission (TLS/SSL)',
+            'GDPR compliant',
+            'Data processing agreements in place'
+        ],
+        'active': bool(SENDGRID_API_KEY),  # Only active if configured
+    },
+}
 
 # Australian GST Rate (10%)
 GST_RATE = 0.10

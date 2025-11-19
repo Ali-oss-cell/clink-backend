@@ -160,6 +160,56 @@ class PsychologistProfile(models.Model):
         help_text="AHPRA registration expiry date"
     )
     
+    # Professional Indemnity Insurance (Compliance Requirement)
+    has_professional_indemnity_insurance = models.BooleanField(
+        default=False,
+        help_text="Has active Professional Indemnity Insurance"
+    )
+    
+    insurance_provider_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Professional Indemnity Insurance provider name"
+    )
+    
+    insurance_policy_number = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Professional Indemnity Insurance policy number"
+    )
+    
+    insurance_expiry_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Professional Indemnity Insurance expiry date"
+    )
+    
+    insurance_coverage_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Insurance coverage amount in AUD (e.g., 1000000.00 for $1M)"
+    )
+    
+    insurance_certificate = models.FileField(
+        upload_to='insurance_certificates/',
+        blank=True,
+        null=True,
+        help_text="Upload insurance certificate (PDF/image)"
+    )
+    
+    insurance_last_verified = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Date insurance certificate was last verified"
+    )
+    
+    insurance_notes = models.TextField(
+        blank=True,
+        help_text="Additional notes about insurance coverage"
+    )
+    
     # Professional Information
     title = models.CharField(
         max_length=10,
@@ -385,6 +435,24 @@ class PsychologistProfile(models.Model):
     def is_ahpra_current(self):
         """Check if AHPRA registration is current"""
         return self.ahpra_expiry_date >= timezone.now().date()
+    
+    @property
+    def is_insurance_current(self):
+        """Check if Professional Indemnity Insurance is current"""
+        if not self.has_professional_indemnity_insurance:
+            return False
+        if not self.insurance_expiry_date:
+            return False
+        return self.insurance_expiry_date >= timezone.now().date()
+    
+    @property
+    def insurance_expires_soon(self):
+        """Check if insurance expires within 30 days"""
+        if not self.insurance_expiry_date:
+            return False
+        from datetime import timedelta
+        thirty_days_from_now = timezone.now().date() + timedelta(days=30)
+        return self.insurance_expiry_date <= thirty_days_from_now and self.insurance_expiry_date >= timezone.now().date()
     
     @property
     def display_name(self):

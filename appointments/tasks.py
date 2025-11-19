@@ -474,6 +474,192 @@ def check_ahpra_expiry():
         return {'error': str(e), **stats}
 
 
+@shared_task(name='appointments.check_insurance_expiry')
+def check_insurance_expiry():
+    """
+    Check Professional Indemnity Insurance expiry for all psychologists
+    
+    Runs monthly to:
+    - Send warning emails 30 days before expiry
+    - Suspend psychologists with expired insurance
+    - Cancel future appointments for psychologists without insurance
+    - Notify practice managers
+    
+    Returns:
+        dict: Statistics on checks performed
+    """
+    from services.models import PsychologistProfile
+    from users.models import User
+    from audit.utils import log_action
+    
+    today = timezone.now().date()
+    warning_date = today + timedelta(days=30)
+    
+    stats = {
+        'expiring_soon': 0,
+        'expired': 0,
+        'warnings_sent': 0,
+        'suspended': 0,
+        'appointments_cancelled': 0,
+        'errors': 0
+    }
+    
+    try:
+        # Find psychologists with expiring insurance (within 30 days)
+        expiring_profiles = PsychologistProfile.objects.filter(
+            has_professional_indemnity_insurance=True,
+            insurance_expiry_date__lte=warning_date,
+            insurance_expiry_date__gt=today,
+            is_active_practitioner=True
+        ).select_related('user')
+        
+        for profile in expiring_profiles:
+            try:
+                # Send warning email
+                send_insurance_expiry_warning.delay(profile.id)
+                stats['expiring_soon'] += 1
+                stats['warnings_sent'] += 1
+                
+                # Log action
+                log_action(
+                    user=profile.user,
+                    action='insurance_expiry_warning',
+                    obj=profile,
+                    metadata={
+                        'expiry_date': profile.insurance_expiry_date.isoformat() if profile.insurance_expiry_date else None,
+                        'days_until_expiry': (profile.insurance_expiry_date - today).days if profile.insurance_expiry_date else None
+                    }
+                )
+            except Exception as e:
+                stats['errors'] += 1
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Error sending insurance expiry warning for {profile.user.email}: {str(e)}')
+        
+        # Find psychologists with expired insurance
+        expired_profiles = PsychologistProfile.objects.filter(
+            has_professional_indemnity_insurance=True,
+            insurance_expiry_date__lt=today,
+            is_active_practitioner=True
+        ).select_related('user')
+        
+        for profile in expired_profiles:
+            try:
+                # Suspend psychologist
+                profile.is_active_practitioner = False
+                profile.has_professional_indemnity_insurance = False
+                profile.save()
+                stats['expired'] += 1
+                stats['suspended'] += 1
+                
+                # Cancel future appointments
+                cancelled_count = cancel_future_appointments_for_psychologist(profile.user)
+                stats['appointments_cancelled'] += cancelled_count
+                
+                # Send notification
+                send_insurance_expired_notification.delay(profile.id)
+                
+                # Log action
+                log_action(
+                    user=profile.user,
+                    action='insurance_expired',
+                    obj=profile,
+                    metadata={
+                        'expiry_date': profile.insurance_expiry_date.isoformat() if profile.insurance_expiry_date else None,
+                        'appointments_cancelled': cancelled_count
+                    }
+                )
+            except Exception as e:
+                stats['errors'] += 1
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Error suspending psychologist {profile.user.email}: {str(e)}')
+        
+        return stats
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Error in check_insurance_expiry task: {str(e)}')
+        return {'error': str(e), **stats}
+
+
+@shared_task(name='appointments.send_insurance_expiry_warning')
+def send_insurance_expiry_warning(psychologist_profile_id):
+    """
+    Send Professional Indemnity Insurance expiry warning email to psychologist
+    
+    Args:
+        psychologist_profile_id: PsychologistProfile ID
+    
+    Returns:
+        dict: Email send result
+    """
+    try:
+        from services.models import PsychologistProfile
+        from core.email_service import send_insurance_expiry_warning_email
+        
+        profile = PsychologistProfile.objects.select_related('user').get(id=psychologist_profile_id)
+        
+        if not profile.insurance_expiry_date:
+            return {'error': 'Insurance expiry date not set'}
+        
+        days_until_expiry = (profile.insurance_expiry_date - timezone.now().date()).days
+        
+        result = send_insurance_expiry_warning_email(profile, days_until_expiry)
+        
+        return result
+    
+    except PsychologistProfile.DoesNotExist:
+        return {'error': 'Psychologist profile not found'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@shared_task(name='appointments.send_insurance_expired_notification')
+def send_insurance_expired_notification(psychologist_profile_id):
+    """
+    Send Professional Indemnity Insurance expired notification to psychologist and practice managers
+    
+    Args:
+        psychologist_profile_id: PsychologistProfile ID
+    
+    Returns:
+        dict: Notification result
+    """
+    try:
+        from services.models import PsychologistProfile
+        from users.models import User
+        from core.email_service import send_insurance_expired_email
+        
+        profile = PsychologistProfile.objects.select_related('user').get(id=psychologist_profile_id)
+        psychologist = profile.user
+        
+        # Send email to psychologist
+        result = send_insurance_expired_email(profile, notify_manager=False)
+        
+        # Send email to all practice managers
+        practice_managers = User.objects.filter(
+            role=User.UserRole.PRACTICE_MANAGER,
+            is_active=True
+        )
+        
+        for manager in practice_managers:
+            try:
+                send_insurance_expired_email(profile, notify_manager=True, manager=manager)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Error sending insurance expired notification to manager {manager.email}: {str(e)}')
+        
+        return result
+    
+    except PsychologistProfile.DoesNotExist:
+        return {'error': 'Psychologist profile not found'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
 @shared_task(name='appointments.send_ahpra_expiry_warning')
 def send_ahpra_expiry_warning(psychologist_profile_id):
     """

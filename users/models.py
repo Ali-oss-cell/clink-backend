@@ -122,6 +122,25 @@ class User(AbstractUser):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+    # Soft Delete (for data deletion requests - APP 13)
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Soft delete flag - data is archived, not permanently deleted"
+    )
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date and time when data was soft-deleted/archived"
+    )
+    deletion_request = models.ForeignKey(
+        'DataDeletionRequest',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deleted_users',
+        help_text="Reference to the deletion request that triggered this deletion"
+    )
+    
     # Django settings
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['first_name', 'last_name']
@@ -217,6 +236,15 @@ class PatientProfile(models.Model):
     consent_to_telehealth = models.BooleanField(default=False)
     consent_to_telehealth_date = models.DateTimeField(null=True, blank=True, help_text="Date telehealth consent was given")
     consent_to_telehealth_version = models.CharField(max_length=20, blank=True, help_text="Version of telehealth consent form")
+    telehealth_emergency_protocol_acknowledged = models.BooleanField(default=False, help_text="Patient confirmed understanding of emergency procedures for telehealth sessions")
+    telehealth_emergency_acknowledged_date = models.DateTimeField(null=True, blank=True, help_text="Date emergency procedures were acknowledged")
+    telehealth_emergency_contact = models.CharField(max_length=255, blank=True, help_text="Emergency contact for telehealth sessions")
+    telehealth_emergency_plan = models.TextField(blank=True, help_text="Patient's plan if telehealth session is interrupted or crisis occurs")
+    telehealth_tech_requirements_acknowledged = models.BooleanField(default=False, help_text="Patient confirmed they meet telehealth technical requirements")
+    telehealth_tech_acknowledged_date = models.DateTimeField(null=True, blank=True, help_text="Date technical requirements were acknowledged")
+    telehealth_recording_consent = models.BooleanField(default=False, help_text="Patient consented to telehealth session recording (if applicable)")
+    telehealth_recording_consent_date = models.DateTimeField(null=True, blank=True, help_text="Date recording consent was given")
+    telehealth_recording_consent_version = models.CharField(max_length=20, blank=True, help_text="Version of recording consent accepted")
     
     # Privacy Policy Compliance (Privacy Act 1988 - APP 1)
     privacy_policy_accepted = models.BooleanField(default=False, help_text="Patient has accepted Privacy Policy")
@@ -293,3 +321,169 @@ class ProgressNote(models.Model):
     
     def __str__(self):
         return f"Session {self.session_number} - {self.patient.get_full_name()}"
+
+
+class DataDeletionRequest(models.Model):
+    """
+    Data Deletion Request (Privacy Act 1988 - APP 13 compliance)
+    
+    Tracks patient requests to delete their personal information.
+    Uses soft delete/archiving to comply with legal retention requirements.
+    """
+    
+    class RequestStatus(models.TextChoices):
+        """Status of deletion request"""
+        PENDING = 'pending', 'Pending Review'
+        APPROVED = 'approved', 'Approved - Scheduled for Deletion'
+        REJECTED = 'rejected', 'Rejected'
+        COMPLETED = 'completed', 'Completed - Data Archived'
+        CANCELLED = 'cancelled', 'Cancelled by Patient'
+    
+    class RejectionReason(models.TextChoices):
+        """Common reasons for rejecting deletion requests"""
+        LEGAL_RETENTION = 'legal_retention', 'Legal retention period not met (7 years for adults, until 25 for children)'
+        ACTIVE_APPOINTMENTS = 'active_appointments', 'Patient has active or upcoming appointments'
+        UNPAID_INVOICES = 'unpaid_invoices', 'Patient has unpaid invoices'
+        LEGAL_OBLIGATION = 'legal_obligation', 'Legal obligation to retain records (court order, investigation)'
+        OTHER = 'other', 'Other (specified in notes)'
+    
+    # Patient making the request
+    patient = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='deletion_requests',
+        help_text="Patient requesting data deletion"
+    )
+    
+    # Request details
+    request_date = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Date and time deletion was requested"
+    )
+    
+    reason = models.TextField(
+        blank=True,
+        help_text="Patient's reason for requesting deletion"
+    )
+    
+    status = models.CharField(
+        max_length=20,
+        choices=RequestStatus.choices,
+        default=RequestStatus.PENDING,
+        help_text="Current status of the deletion request"
+    )
+    
+    # Review details (admin/practice manager)
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_deletion_requests',
+        help_text="Admin or practice manager who reviewed the request"
+    )
+    
+    reviewed_date = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date and time request was reviewed"
+    )
+    
+    rejection_reason = models.CharField(
+        max_length=50,
+        choices=RejectionReason.choices,
+        blank=True,
+        help_text="Reason for rejection (if rejected)"
+    )
+    
+    rejection_notes = models.TextField(
+        blank=True,
+        help_text="Additional notes about rejection or approval"
+    )
+    
+    # Deletion execution
+    scheduled_deletion_date = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date when data will be archived/deleted (respects retention policy)"
+    )
+    
+    deletion_completed_date = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date when data was actually archived/deleted"
+    )
+    
+    # Retention policy compliance
+    retention_period_years = models.PositiveIntegerField(
+        default=7,
+        help_text="Number of years data must be retained (7 for adults, until age 25 for children)"
+    )
+    
+    earliest_deletion_date = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Earliest date data can be deleted based on retention policy"
+    )
+    
+    # Metadata
+    notes = models.TextField(
+        blank=True,
+        help_text="Internal notes about the deletion request"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-request_date']
+        verbose_name = 'Data Deletion Request'
+        verbose_name_plural = 'Data Deletion Requests'
+    
+    def __str__(self):
+        return f"Deletion Request - {self.patient.get_full_name()} ({self.status})"
+    
+    def calculate_earliest_deletion_date(self):
+        """
+        Calculate the earliest date data can be deleted based on retention policy.
+        - Adults: 7 years after last appointment or last contact
+        - Children: Until age 25
+        """
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        patient = self.patient
+        patient_profile = getattr(patient, 'patient_profile', None)
+        
+        # Check if patient is a minor (under 18)
+        if patient.date_of_birth:
+            age = (timezone.now().date() - patient.date_of_birth).days // 365
+            if age < 18:
+                # Child: retain until age 25
+                years_until_25 = 25 - age
+                self.retention_period_years = years_until_25
+                self.earliest_deletion_date = timezone.now() + timedelta(days=years_until_25 * 365)
+                return self.earliest_deletion_date
+        
+        # Adult: 7 years after last contact
+        from appointments.models import Appointment
+        last_appointment = Appointment.objects.filter(
+            patient=patient
+        ).order_by('-appointment_date').first()
+        
+        if last_appointment:
+            last_contact_date = last_appointment.appointment_date
+        else:
+            # Use account creation date if no appointments
+            last_contact_date = patient.date_joined
+        
+        self.retention_period_years = 7
+        self.earliest_deletion_date = last_contact_date + timedelta(days=7 * 365)
+        return self.earliest_deletion_date
+    
+    def can_be_deleted_now(self):
+        """Check if data can be deleted now based on retention policy"""
+        from django.utils import timezone
+        if not self.earliest_deletion_date:
+            self.calculate_earliest_deletion_date()
+        return timezone.now() >= self.earliest_deletion_date

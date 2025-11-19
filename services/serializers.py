@@ -42,6 +42,8 @@ class PsychologistProfileSerializer(serializers.ModelSerializer):
     
     # Computed fields
     is_ahpra_current = serializers.BooleanField(read_only=True)
+    is_insurance_current = serializers.BooleanField(read_only=True)
+    insurance_expires_soon = serializers.BooleanField(read_only=True)
     display_name = serializers.CharField(read_only=True)
     patient_cost_after_rebate = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
     languages_list = serializers.ListField(read_only=True)
@@ -67,6 +69,12 @@ class PsychologistProfileSerializer(serializers.ModelSerializer):
             # Professional Credentials
             'ahpra_registration_number', 'ahpra_expiry_date', 'is_ahpra_current',
             'title', 'qualifications', 'years_experience', 'experience_level',
+            
+            # Professional Indemnity Insurance
+            'has_professional_indemnity_insurance', 'insurance_provider_name',
+            'insurance_policy_number', 'insurance_expiry_date', 'is_insurance_current',
+            'insurance_expires_soon', 'insurance_coverage_amount', 'insurance_certificate',
+            'insurance_last_verified', 'insurance_notes',
             
             # Practice Information
             'consultation_fee', 'medicare_provider_number', 'medicare_rebate_amount',
