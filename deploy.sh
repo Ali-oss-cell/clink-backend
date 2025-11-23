@@ -31,8 +31,8 @@ sudo apt update && sudo apt upgrade -y
 # 2. Install dependencies
 echo -e "\n${YELLOW}[2/15] Installing system dependencies...${NC}"
 sudo apt install -y \
-    python3.11 \
-    python3.11-venv \
+    python3 \
+    python3-venv \
     python3-pip \
     postgresql \
     postgresql-contrib \
@@ -69,7 +69,7 @@ cd $APP_DIR
 
 # 5. Create virtual environment
 echo -e "\n${YELLOW}[5/15] Creating Python virtual environment...${NC}"
-python3.11 -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 
 # 6. Install Python packages
