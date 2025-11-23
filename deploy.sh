@@ -75,6 +75,7 @@ source venv/bin/activate
 # 6. Install Python packages
 echo -e "\n${YELLOW}[6/15] Installing Python packages...${NC}"
 pip install --upgrade pip
+pip install setuptools wheel
 pip install -r requirements.txt
 
 # 7. Create .env file if it doesn't exist
