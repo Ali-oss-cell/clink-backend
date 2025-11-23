@@ -1,0 +1,24 @@
+[Unit]
+Description=gunicorn daemon for psychology clinic
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/clink-backend
+EnvironmentFile=/var/www/clink-backend/.env
+ExecStart=/var/www/clink-backend/venv/bin/gunicorn \
+    --access-logfile - \
+    --error-logfile - \
+    --workers 3 \
+    --bind unix:/var/www/clink-backend/gunicorn.sock \
+    --timeout 120 \
+    --keep-alive 5 \
+    psychology_clinic.wsgi:application
+
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+

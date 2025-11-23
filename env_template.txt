@@ -1,7 +1,7 @@
 # Django Settings
 DEBUG=True
 SECRET_KEY=your-secret-key-here
-ALLOWED_HOSTS=localhost,127.0.0.1
+ALLOWED_HOSTS=localhost,127.0.0.1,209.38.89.74,tailoredpsychology.com.au,www.tailoredpsychology.com.au
 
 # Database (for production)
 # DATABASE_URL=postgres://user:password@localhost:5432/psychology_clinic

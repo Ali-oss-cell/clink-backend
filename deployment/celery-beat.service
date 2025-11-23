@@ -1,0 +1,22 @@
+[Unit]
+Description=Celery Beat scheduler for psychology clinic
+After=network.target redis.service
+Requires=redis.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/clink-backend
+EnvironmentFile=/var/www/clink-backend/.env
+ExecStart=/var/www/clink-backend/venv/bin/celery -A psychology_clinic beat \
+    --loglevel=info \
+    --logfile=/var/log/celery/beat.log \
+    --pidfile=/var/run/celery/beat.pid \
+    --scheduler django_celery_beat.schedulers:DatabaseScheduler
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+

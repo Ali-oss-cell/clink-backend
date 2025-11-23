@@ -1,0 +1,23 @@
+[Unit]
+Description=Celery worker service for psychology clinic
+After=network.target redis.service
+Requires=redis.service
+
+[Service]
+Type=forking
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/clink-backend
+EnvironmentFile=/var/www/clink-backend/.env
+ExecStart=/var/www/clink-backend/venv/bin/celery -A psychology_clinic worker \
+    --loglevel=info \
+    --logfile=/var/log/celery/worker.log \
+    --pidfile=/var/run/celery/worker.pid \
+    --detach
+ExecStop=/bin/kill -s TERM $MAINPID
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
