@@ -231,12 +231,17 @@ SIMPLE_JWT = {
 
 # CORS Configuration
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # React frontend
+    "http://localhost:3000",  # React frontend (dev)
     "http://127.0.0.1:3000",
-    "http://localhost:5173",  # Vite React frontend
+    "http://localhost:5173",  # Vite React frontend (dev)
     "http://127.0.0.1:5173",
-    "http://localhost:8080",  # Vue frontend
+    "http://localhost:8080",  # Vue frontend (dev)
     "http://127.0.0.1:8080",
+    # Production frontend (App Platform)
+    "https://tailoredpsychology.com.au",
+    "https://www.tailoredpsychology.com.au",
+    "http://tailoredpsychology.com.au",  # HTTP fallback
+    "http://www.tailoredpsychology.com.au",  # HTTP fallback
 ]
 
 CORS_ALLOW_CREDENTIALS = True
