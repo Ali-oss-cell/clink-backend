@@ -33,6 +33,12 @@ EMAIL_HOST_PASSWORD=your-app-password
 TIME_ZONE=Australia/Sydney
 USE_TZ=True
 
+# Privacy Policy & Compliance
+PRIVACY_POLICY_VERSION=1.0
+PRIVACY_POLICY_URL=https://tailoredpsychology.com.au/privacy-policy
+CONSENT_FORM_VERSION=1.0
+TELEHEALTH_CONSENT_VERSION=1.0
+
 # File Storage (for production)
 # AWS_ACCESS_KEY_ID=your-aws-access-key
 # AWS_SECRET_ACCESS_KEY=your-aws-secret-key
