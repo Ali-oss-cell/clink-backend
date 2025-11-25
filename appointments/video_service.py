@@ -38,14 +38,9 @@ class TwilioVideoService:
                 "TWILIO_AUTH_TOKEN, TWILIO_API_KEY, and TWILIO_API_SECRET in settings."
             )
         
-        # Use regional client for Australia (au1)
-        # This is required when using regional API keys
-        self.client = Client(
-            self.account_sid, 
-            self.auth_token,
-            region='au1',  # Australia region
-            edge='sydney'  # Sydney edge location
-        )
+        # Initialize Twilio client
+        # Video API uses global endpoint; region is specified in room creation (media_region='au1')
+        self.client = Client(self.account_sid, self.auth_token)
     
     def create_room(self, appointment_id, appointment_date=None, enable_recording=False):
         """
