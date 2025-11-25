@@ -7,6 +7,7 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.core.validators import RegexValidator
 from django.utils import timezone
+from .managers import UserManager
 
 
 class User(AbstractUser):
@@ -144,6 +145,7 @@ class User(AbstractUser):
     # Django settings
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['first_name', 'last_name']
+    objects = UserManager()
     
     class Meta:
         db_table = 'users_user'
