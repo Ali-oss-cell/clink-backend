@@ -83,22 +83,27 @@ def get_or_create_test_users():
         )
         
         # Create psychologist profile
-        from users.models import PsychologistProfile
+        from services.models import PsychologistProfile
+        from datetime import date, timedelta
         PsychologistProfile.objects.get_or_create(
             user=doctor,
             defaults={
-                'registration_number': 'PSY0001234',
-                'specialization': 'Clinical Psychology',
+                'ahpra_registration_number': 'PSY0001234',
+                'ahpra_expiry_date': date.today() + timedelta(days=365),  # Expires in 1 year
                 'consultation_fee': 180.00,
                 'medicare_rebate_amount': 87.45,
-                'years_of_experience': 10,
-                'bio': 'Experienced clinical psychologist specializing in anxiety and depression.'
+                'years_experience': 10,
+                'bio': 'Experienced clinical psychologist specializing in anxiety and depression.',
+                'qualifications': 'PhD in Clinical Psychology',
+                'title': 'Dr',
+                'has_professional_indemnity_insurance': True
             }
         )
         print_success(f"Created doctor: {doctor.get_full_name()} ({doctor.email})")
     
     # Create test patient
     if not patient:
+        from datetime import date
         patient = User.objects.create_user(
             email='test.patient@clinic.test',
             password='test123',
@@ -106,6 +111,8 @@ def get_or_create_test_users():
             last_name='Smith',
             role=User.UserRole.PATIENT,
             phone_number='+61498765432',
+            date_of_birth=date(1990, 1, 15),
+            gender='male',
             is_active=True
         )
         
@@ -114,15 +121,11 @@ def get_or_create_test_users():
         PatientProfile.objects.get_or_create(
             user=patient,
             defaults={
-                'date_of_birth': '1990-01-15',
-                'gender': 'male',
+                'gender_identity': 'male',
                 'emergency_contact_name': 'Jane Smith',
                 'emergency_contact_phone': '+61412345679',
                 'emergency_contact_relationship': 'spouse',
-                'has_medicare': True,
-                'medicare_number': '1234567890',
-                'medicare_irn': '1',
-                'medicare_expiry_date': '2026-12-31'
+                'preferred_name': 'John'
             }
         )
         print_success(f"Created patient: {patient.get_full_name()} ({patient.email})")
