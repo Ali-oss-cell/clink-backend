@@ -7,10 +7,12 @@ ALLOWED_HOSTS=localhost,127.0.0.1,209.38.89.74,tailoredpsychology.com.au,www.tai
 # DATABASE_URL=postgres://user:password@localhost:5432/psychology_clinic
 
 # Twilio Configuration (Video Calls & WhatsApp)
+# IMPORTANT: Video API requires US1 region API Key (not AU1 or other regions)
 # Get these from: https://console.twilio.com → Account → API Keys & Tokens
+# When creating API Key, select "United States (US1)" region for Video to work
 TWILIO_ACCOUNT_SID=your-twilio-account-sid
 TWILIO_AUTH_TOKEN=your-twilio-auth-token
-TWILIO_API_KEY=your-twilio-api-key-sid
+TWILIO_API_KEY=your-twilio-api-key-sid-us1-region
 TWILIO_API_SECRET=your-twilio-api-secret
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 # Optional: Status Callback URL for video room events
