@@ -2338,11 +2338,21 @@ class TelehealthConsentView(APIView):
     
     def get(self, request):
         """Get telehealth consent status"""
+        # Psychologists don't need to give consent, but allow them to access the endpoint
+        # (frontend may call this before joining video calls)
         if not request.user.is_patient():
-            return Response(
-                {'error': 'Only patients can view telehealth consent status'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            # Return a response indicating consent is not required for psychologists
+            from django.conf import settings
+            latest_version = getattr(settings, 'TELEHEALTH_CONSENT_VERSION', '1.0')
+            return Response({
+                'consent_to_telehealth': True,  # Psychologists don't need consent
+                'telehealth_consent_date': None,
+                'telehealth_consent_version': latest_version,
+                'latest_version': latest_version,
+                'needs_update': False,
+                'is_psychologist': True,  # Flag to indicate this is a psychologist
+                'message': 'Psychologists do not require telehealth consent'
+            })
         
         patient_profile, _ = PatientProfile.objects.get_or_create(user=request.user)
         from django.conf import settings
