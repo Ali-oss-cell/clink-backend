@@ -1,273 +1,310 @@
-# 🎥 Video Call Setup - What You Need to Do
+# Video Call Setup Guide - Twilio Video Configuration
 
-## ✅ **What's Already Working**
+## 📋 Required Environment Variables (.env)
 
-1. **✅ Backend Video Service** - Complete
-   - Video room creation logic
-   - Token generation (WORKING!)
-   - Room management
-   - API endpoints ready
+### Essential Twilio Credentials (Required for Video Calls)
 
-2. **✅ API Endpoints** - Ready
-   - `POST /api/appointments/video-room/<appointment_id>/` - Create room
-   - `GET /api/appointments/video-token/<appointment_id>/` - Get access token
+Add these to your `.env` file on your Droplet:
 
-3. **✅ Twilio Configuration** - 90% Complete
-   - API Key: ✅ Working
-   - API Secret: ✅ Working
-   - Account SID: ✅ Set
-   - Auth Token: ⚠️ Needs account verification (but tokens still work!)
-
----
-
-## ⚠️ **What Needs to Be Done**
-
-### 1. **Fix Twilio Auth Token** (5-10 minutes)
-
-**Current Issue:** Auth Token returns 401 error (trial account needs verification)
-
-**Solution:**
-1. Go to [Twilio Console](https://console.twilio.com)
-2. Verify your phone number (if prompted)
-3. Complete any account setup steps
-4. Regenerate Auth Token:
-   - Account → API Keys & Tokens → Auth Tokens
-   - Click "Regenerate" on Live Auth Token
-   - Copy new token
-   - Update `.env` file
-
-**Why This Matters:**
-- Token generation works without it ✅
-- Room creation via REST API needs it ⚠️
-- You can still create rooms manually or use tokens directly
-
-**Status:** Optional for now (tokens work!), but needed for automatic room creation
-
----
-
-### 2. **Frontend Video Component** (React/TypeScript)
-
-**What's Missing:**
-- React component to display video
-- Twilio Video SDK integration
-- UI for joining/leaving calls
-- Camera/microphone controls
-
-**What You Need:**
-
-#### A. Install Twilio Video SDK
 ```bash
-npm install twilio-video
+# ============================================
+# TWILIO VIDEO CONFIGURATION (REQUIRED)
+# ============================================
+
+# Twilio Account Credentials
+# Get these from: https://console.twilio.com → Account → API Keys & Tokens
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=your-twilio-auth-token-here
+
+# Twilio API Key & Secret (REQUIRED for Video Tokens)
+# Create API Key at: https://console.twilio.com → Account → API Keys & Tokens → Create API Key
+TWILIO_API_KEY=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_API_SECRET=your-api-secret-here
+
+# Optional: Status Callback URL (for webhook events)
+# Set this to receive room events (participant join/leave, room ended, etc.)
+TWILIO_STATUS_CALLBACK_URL=https://api.tailoredpsychology.com.au/api/appointments/twilio-status-callback/
 ```
 
-#### B. Create Video Component
-```typescript
-// Example structure (you'll need to build this)
-import Video from 'twilio-video';
+---
 
-// Component should:
-// 1. Get access token from your API
-// 2. Connect to Twilio room
-// 3. Display local and remote video
-// 4. Handle camera/mic controls
+## 🔑 How to Get Your Twilio Credentials
+
+### Step 1: Get Account SID and Auth Token
+
+1. Go to: https://console.twilio.com
+2. Navigate to: **Account** → **API Keys & Tokens**
+3. You'll see:
+   - **Account SID**: `ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+   - **Auth Token**: Click "View" to reveal (copy this)
+
+### Step 2: Create API Key (Required for Video)
+
+1. In **API Keys & Tokens** page, click **Create API Key**
+2. Give it a name: `Video API Key - Production`
+3. Click **Create**
+4. **IMPORTANT**: Copy the **API Key SID** (`SKxxxxxxxx...`) and **API Secret** immediately
+   - ⚠️ The secret is shown **only once** - save it now!
+   - If you lose it, you'll need to create a new API key
+
+### Step 3: Add to .env File
+
+On your Droplet:
+
+```bash
+cd /var/www/clink-backend
+sudo nano .env
 ```
 
-#### C. API Integration
-Your frontend needs to:
-1. Call `GET /api/appointments/video-token/<appointment_id>/` to get token
-2. Use token to connect to Twilio room
-3. Display video streams
+Add the credentials:
 
-**Status:** ❌ Not implemented (backend ready, frontend needed)
-
----
-
-### 3. **Test Video Flow** (After Frontend is Ready)
-
-**Test Steps:**
-1. Create a telehealth appointment
-2. Create video room (via API or automatically)
-3. Get access token for patient
-4. Get access token for psychologist
-5. Both join the video room
-6. Test video/audio
-7. Test leaving the room
-
----
-
-## 🚀 **Quick Start Options**
-
-### **Option A: Use Tokens Directly (Works Now!)**
-
-Even with Auth Token issue, you can:
-
-1. **Generate tokens manually:**
-   ```python
-   # In Django shell
-   from appointments.video_service import get_video_service
-   video_service = get_video_service()
-   
-   # Generate token for a room
-   token = video_service.generate_access_token(
-       user_identity="patient-123",
-       room_name="test-room-123",
-       ttl_hours=1
-   )
-   print(token)
-   ```
-
-2. **Use tokens in frontend:**
-   - Frontend calls your API to get token
-   - Frontend uses token to connect to Twilio
-   - Video works!
-
-3. **Create rooms manually:**
-   - Create room name in your database
-   - Use that room name for tokens
-   - Both users join same room
-
-**This works right now!** ✅
-
----
-
-### **Option B: Fix Auth Token First (Recommended)**
-
-1. Verify Twilio account
-2. Regenerate Auth Token
-3. Automatic room creation will work
-4. Full automation ready
-
----
-
-## 📋 **Step-by-Step: What to Do Now**
-
-### **Step 1: Verify Twilio Account** (5 minutes)
-- [ ] Go to Twilio Console
-- [ ] Verify phone number
-- [ ] Complete account setup
-- [ ] Regenerate Auth Token
-- [ ] Update `.env` file
-
-### **Step 2: Test Token Generation** (Already Works!)
 ```bash
-# Test in Django shell
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=your-actual-auth-token
+TWILIO_API_KEY=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_API_SECRET=your-actual-api-secret
+TWILIO_STATUS_CALLBACK_URL=https://api.tailoredpsychology.com.au/api/appointments/twilio-status-callback/
+```
+
+Save and restart:
+
+```bash
+sudo systemctl restart gunicorn
+```
+
+---
+
+## ✅ Video Call Setup Checklist
+
+### 1. Twilio Console Settings
+
+Go to: **Video** → **Rooms** → **Settings**
+
+- ✅ **Media Region**: `Australia - au1` (already set correctly)
+- ✅ **Status Callback URL**: `https://api.tailoredpsychology.com.au/api/appointments/twilio-status-callback/`
+- ✅ **HTTP Method**: `POST`
+- ✅ **Client-side Room Creation**: `Enabled` (already set)
+- ⚠️ **Recording**: `Disabled` by default (enabled per-room with consent)
+
+### 2. Environment Variables
+
+Verify all 4 required variables are set:
+
+```bash
+# Check if variables are set
+cd /var/www/clink-backend
+source venv/bin/activate
 python manage.py shell
-
-from appointments.video_service import get_video_service
-video_service = get_video_service()
-token = video_service.generate_access_token(
-    user_identity="test-user",
-    room_name="test-room",
-    ttl_hours=1
-)
-print("✅ Token generated:", token[:50] + "...")
 ```
 
-### **Step 3: Test Room Creation** (After Auth Token Fixed)
+```python
+from django.conf import settings
+print("Account SID:", bool(settings.TWILIO_ACCOUNT_SID))
+print("Auth Token:", bool(settings.TWILIO_AUTH_TOKEN))
+print("API Key:", bool(settings.TWILIO_API_KEY))
+print("API Secret:", bool(settings.TWILIO_API_SECRET))
+```
+
+All should print `True`. If any print `False`, add the missing variable to `.env`.
+
+### 3. Test Video Service
+
+Test the video service configuration:
+
 ```bash
-# Test room creation
+cd /var/www/clink-backend
+source venv/bin/activate
 python manage.py shell
+```
 
+```python
 from appointments.video_service import get_video_service
+
+# Test credentials
 video_service = get_video_service()
-room = video_service.create_room(appointment_id=1)
-print("✅ Room created:", room)
+result = video_service.validate_credentials()
+print(result)
 ```
 
-### **Step 4: Build Frontend Component** (When Ready)
-- [ ] Install `twilio-video` package
-- [ ] Create video component
-- [ ] Integrate with your API
-- [ ] Test video calls
-
----
-
-## 🎯 **Current Status Summary**
-
-| Component | Status | Action Needed |
-|-----------|--------|---------------|
-| Backend Service | ✅ 100% | None |
-| API Endpoints | ✅ 100% | None |
-| Token Generation | ✅ Working | None |
-| Room Creation | ⚠️ 90% | Fix Auth Token |
-| Frontend Component | ❌ 0% | Build React component |
-| Testing | ⏳ Pending | After frontend ready |
-
----
-
-## 💡 **Recommendation**
-
-**For Now:**
-1. ✅ **Token generation works** - You can use this immediately
-2. ⚠️ **Fix Auth Token** - Verify Twilio account (5 minutes)
-3. ⏳ **Build Frontend** - When you're ready to test video calls
-
-**Priority:**
-1. **High:** Fix Auth Token (quick fix, enables full automation)
-2. **Medium:** Build frontend component (needed for actual video calls)
-3. **Low:** Advanced features (recording, screen sharing, etc.)
-
----
-
-## 🔧 **Quick Fix: Auth Token**
-
-**Right Now:**
-1. Go to https://console.twilio.com
-2. Check for "Verify" messages
-3. Verify your phone number
-4. Account → API Keys & Tokens → Auth Tokens
-5. Regenerate Live Auth Token
-6. Copy new token
-7. Update `.env`:
-   ```bash
-   TWILIO_AUTH_TOKEN=your_new_token_here
-   ```
-8. Test room creation again
-
-**After this, everything will work!** 🎉
-
----
-
-## 📞 **API Endpoints Ready to Use**
-
-### Create Video Room
-```http
-POST /api/appointments/video-room/<appointment_id>/
-Authorization: Bearer <token>
-```
-
-### Get Access Token
-```http
-GET /api/appointments/video-token/<appointment_id>/
-Authorization: Bearer <token>
-```
-
-**Response:**
-```json
+Expected output:
+```python
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
-  "room_name": "apt-123-...",
-  "user_identity": "1-user@example.com",
-  "expires_in": 7200
+    'valid': True,
+    'account_sid': 'ACxxxxxxxx...',
+    'account_status': 'active',
+    'api_key_valid': True,
+    'credentials_match': True
 }
 ```
 
+If `api_key_valid` is `False`, check that your API Key and Secret match your Account SID.
+
 ---
 
-## ✅ **Bottom Line**
+## 🔐 Important Security Question: Token Sharing
 
-**What Works Now:**
-- ✅ Token generation (most important!)
-- ✅ Backend API endpoints
-- ✅ Video service logic
+### ❌ **NO - Do NOT share the same token between patient and doctor!**
 
-**What Needs Work:**
-- ⚠️ Auth Token verification (5 minutes)
-- ❌ Frontend component (when ready)
+**Each user gets their own unique token** with their own identity. This is the correct and secure approach.
 
-**You're 90% there!** Just need to:
-1. Verify Twilio account → Fix Auth Token
-2. Build frontend component → Test video calls
+### How It Works:
 
-**The hard part (backend) is done!** 🎉
+1. **Patient requests token**:
+   - Endpoint: `GET /api/appointments/video-token/{appointment_id}/`
+   - User: Patient (authenticated)
+   - Returns: Token with identity `"{patient_id}-{patient_email}"`
 
+2. **Psychologist requests token**:
+   - Endpoint: `GET /api/appointments/video-token/{appointment_id}/`
+   - User: Psychologist (authenticated)
+   - Returns: Token with identity `"{psychologist_id}-{psychologist_email}"`
+
+3. **Both tokens**:
+   - ✅ Join the **same room** (same `room_name`)
+   - ✅ Have **different identities** (different `user_identity`)
+   - ✅ Are **unique to each user** (cannot be shared)
+
+### Code Reference:
+
+```python
+# appointments/views.py - GetVideoAccessTokenView
+user_identity = f"{request.user.id}-{request.user.email}"
+
+access_token = video_service.generate_access_token(
+    user_identity=user_identity,  # Unique per user
+    room_name=appointment.video_room_id,  # Same room for both
+    ttl_hours=ttl_hours
+)
+```
+
+### Why This Is Secure:
+
+1. **Identity Tracking**: Each participant has a unique identity in the room
+2. **Access Control**: Only patient or psychologist can get a token for their appointment
+3. **Token Expiration**: Tokens expire after the session (prevents reuse)
+4. **Audit Trail**: Twilio logs show which identity joined/left
+
+---
+
+## 🎥 Video Call Flow
+
+### Step-by-Step Process:
+
+1. **Appointment Created** → Backend creates video room (if needed)
+2. **Patient Opens Video Page** → Frontend calls `/api/appointments/video-token/{id}/`
+   - Backend generates token with identity: `"123-patient@email.com"`
+   - Returns token to frontend
+3. **Psychologist Opens Video Page** → Frontend calls `/api/appointments/video-token/{id}/`
+   - Backend generates token with identity: `"456-psychologist@email.com"`
+   - Returns token to frontend
+4. **Both Join Room** → Twilio Video connects them in the same room
+5. **Session Ends** → Room can be completed via API or auto-closes
+
+---
+
+## 🧪 Testing Video Calls
+
+### Test Token Generation:
+
+```bash
+# Get appointment ID first
+curl -X GET https://api.tailoredpsychology.com.au/api/appointments/ \
+  -H "Authorization: Bearer YOUR_PATIENT_TOKEN" \
+  | jq '.[0].id'
+
+# Get video token (as patient)
+curl -X GET https://api.tailoredpsychology.com.au/api/appointments/video-token/1/ \
+  -H "Authorization: Bearer YOUR_PATIENT_TOKEN"
+
+# Get video token (as psychologist)
+curl -X GET https://api.tailoredpsychology.com.au/api/appointments/video-token/1/ \
+  -H "Authorization: Bearer YOUR_PSYCHOLOGIST_TOKEN"
+```
+
+**Expected Response:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "room_name": "apt-1-1234567890-abc12345",
+  "user_identity": "123-patient@email.com",
+  "expires_in": 5400,
+  "expires_at": "2025-01-24T15:30:00Z",
+  "appointment_id": 1,
+  "token_valid_until": "90 minutes (1 hours)"
+}
+```
+
+**Notice**: `user_identity` is different for patient vs psychologist!
+
+---
+
+## 📝 Summary
+
+### Required .env Variables:
+
+```bash
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=your-auth-token
+TWILIO_API_KEY=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_API_SECRET=your-api-secret
+TWILIO_STATUS_CALLBACK_URL=https://api.tailoredpsychology.com.au/api/appointments/twilio-status-callback/
+```
+
+### Token Security:
+
+- ✅ **Each user gets their own unique token**
+- ✅ **Same room, different identities**
+- ✅ **Tokens are user-specific and cannot be shared**
+- ✅ **Secure and compliant with Twilio best practices**
+
+### Setup Steps:
+
+1. ✅ Get Twilio credentials from Console
+2. ✅ Create API Key (for video tokens)
+3. ✅ Add to `.env` file
+4. ✅ Restart Gunicorn
+5. ✅ Test token generation
+6. ✅ Configure status callback URL (optional)
+
+---
+
+## 🆘 Troubleshooting
+
+### Error: "Twilio credentials not configured"
+
+**Solution**: Check that all 4 variables are in `.env`:
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `TWILIO_API_KEY`
+- `TWILIO_API_SECRET`
+
+### Error: "Invalid API Key"
+
+**Solution**: 
+1. Verify API Key SID starts with `SK`
+2. Verify API Secret matches the key
+3. Create a new API Key if secret was lost
+
+### Error: "Token generation failed"
+
+**Solution**:
+1. Check API Key belongs to the same Account SID
+2. Verify API Secret is correct
+3. Test with `validate_credentials()` method
+
+### Tokens Not Working in Frontend
+
+**Solution**:
+1. Verify token is being generated (check API response)
+2. Check token expiration (tokens expire after session)
+3. Verify room name matches between patient and psychologist
+4. Check browser console for Twilio Video SDK errors
+
+---
+
+## 📚 Additional Resources
+
+- **Twilio Video Docs**: https://www.twilio.com/docs/video
+- **Twilio Console**: https://console.twilio.com
+- **API Keys Guide**: https://www.twilio.com/docs/iam/keys/api-key
+- **Video Token Guide**: https://www.twilio.com/docs/video/tutorials/user-identity-access-tokens
