@@ -38,9 +38,13 @@ class TwilioVideoService:
                 "TWILIO_AUTH_TOKEN, TWILIO_API_KEY, and TWILIO_API_SECRET in settings."
             )
         
-        # Initialize Twilio client
-        # Video API uses global endpoint; region is specified in room creation (media_region='au1')
-        self.client = Client(self.account_sid, self.auth_token)
+        # Initialize Twilio client with regional endpoint for AU1 API key
+        # Regional API keys need regional endpoint for Account API authentication
+        self.client = Client(self.account_sid, self.auth_token, region='au1', edge='sydney')
+        
+        # Create a separate client for Video API (uses global endpoint)
+        # Video API doesn't support regional endpoints like video.sydney.au1.twilio.com
+        self.video_client = Client(self.account_sid, self.auth_token)
     
     def create_room(self, appointment_id, appointment_date=None, enable_recording=False):
         """
@@ -82,7 +86,8 @@ class TwilioVideoService:
                 room_params['status_callback'] = status_callback_url
                 room_params['status_callback_method'] = 'POST'
             
-            room = self.client.video.v1.rooms.create(**room_params)
+            # Use video_client for Video API (global endpoint)
+            room = self.video_client.video.v1.rooms.create(**room_params)
             
             return {
                 'room_name': room.unique_name,
@@ -112,7 +117,7 @@ class TwilioVideoService:
         """
         try:
             # Try to get existing room
-            rooms = self.client.video.v1.rooms.list(unique_name=room_name, limit=1)
+            rooms = self.video_client.video.v1.rooms.list(unique_name=room_name, limit=1)
             
             if rooms:
                 room = rooms[0]
@@ -172,7 +177,7 @@ class TwilioVideoService:
             dict: Updated room status
         """
         try:
-            room = self.client.video.v1.rooms(room_sid).update(status='completed')
+            room = self.video_client.video.v1.rooms(room_sid).update(status='completed')
             
             return {
                 'room_sid': room.sid,
@@ -201,7 +206,7 @@ class TwilioVideoService:
             if status:
                 list_params['status'] = status
             
-            participants = self.client.video.v1.rooms(room_sid).participants.list(**list_params)
+            participants = self.video_client.video.v1.rooms(room_sid).participants.list(**list_params)
             
             return [
                 {
@@ -234,7 +239,7 @@ class TwilioVideoService:
             dict: Participant details
         """
         try:
-            participant = self.client.video.v1.rooms(room_sid).participants(
+            participant = self.video_client.video.v1.rooms(room_sid).participants(
                 participant_identity_or_sid
             ).fetch()
             
@@ -267,7 +272,7 @@ class TwilioVideoService:
             dict: Updated participant details
         """
         try:
-            participant = self.client.video.v1.rooms(room_sid).participants(
+            participant = self.video_client.video.v1.rooms(room_sid).participants(
                 participant_identity_or_sid
             ).update(status='disconnected')
             
@@ -295,7 +300,7 @@ class TwilioVideoService:
             dict: Room status details
         """
         try:
-            rooms = self.client.video.v1.rooms.list(unique_name=room_name, limit=1)
+            rooms = self.video_client.video.v1.rooms.list(unique_name=room_name, limit=1)
             
             if rooms:
                 room = rooms[0]
