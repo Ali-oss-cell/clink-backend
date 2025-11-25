@@ -17,6 +17,7 @@ from django.db.models import Q, Count  # type: ignore
 from django.db import models  # type: ignore
 from django.utils import timezone  # type: ignore
 from datetime import timedelta  # type: ignore
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 
 from .models import PatientProfile, ProgressNote, DataDeletionRequest
@@ -214,9 +215,27 @@ class AdminCreateUserView(APIView):
                 qualifications = request.data.get('qualifications', '')
                 years_experience = request.data.get('years_experience', 0)
                 consultation_fee = request.data.get('consultation_fee', 180.00)
+                medicare_rebate_amount = request.data.get('medicare_rebate_amount', 87.45)
                 medicare_provider_number = request.data.get('medicare_provider_number', '')
                 bio = request.data.get('bio', '')
                 is_accepting_new_patients = request.data.get('is_accepting_new_patients', True)
+
+                # Normalize monetary fields to two decimal places
+                try:
+                    consultation_fee = Decimal(str(consultation_fee)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                except (InvalidOperation, TypeError):
+                    return Response(
+                        {'error': 'Consultation fee must be numeric with up to 2 decimal places'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                try:
+                    medicare_rebate_amount = Decimal(str(medicare_rebate_amount)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                except (InvalidOperation, TypeError):
+                    return Response(
+                        {'error': 'Medicare rebate amount must be numeric with up to 2 decimal places'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
                 
                 # Create psychologist profile with all details
                 psychologist_profile = PsychologistProfile.objects.create(
@@ -227,6 +246,7 @@ class AdminCreateUserView(APIView):
                     qualifications=qualifications,
                     years_experience=years_experience,
                     consultation_fee=consultation_fee,
+                    medicare_rebate_amount=medicare_rebate_amount,
                     medicare_provider_number=medicare_provider_number,
                     bio=bio,
                     is_accepting_new_patients=is_accepting_new_patients
