@@ -81,14 +81,16 @@ def get_or_create_test_users():
             phone_number='+61412345678',
             is_active=True
         )
-        
-        # Create psychologist profile
-        from services.models import PsychologistProfile
-        from datetime import date, timedelta
-        PsychologistProfile.objects.get_or_create(
+        print_success(f"Created doctor user: {doctor.get_full_name()} ({doctor.email})")
+    
+    # Ensure psychologist profile exists (create if missing)
+    from services.models import PsychologistProfile
+    from datetime import date, timedelta
+    try:
+        profile, created = PsychologistProfile.objects.get_or_create(
             user=doctor,
             defaults={
-                'ahpra_registration_number': 'PSY0001234',
+                'ahpra_registration_number': f'PSY{doctor.id:06d}',  # Unique per doctor
                 'ahpra_expiry_date': date.today() + timedelta(days=365),  # Expires in 1 year
                 'consultation_fee': 180.00,
                 'medicare_rebate_amount': 87.45,
@@ -99,7 +101,19 @@ def get_or_create_test_users():
                 'has_professional_indemnity_insurance': True
             }
         )
-        print_success(f"Created doctor: {doctor.get_full_name()} ({doctor.email})")
+        if created:
+            print_success(f"Created psychologist profile for {doctor.get_full_name()}")
+        else:
+            print_info(f"Psychologist profile already exists for {doctor.get_full_name()}")
+    except Exception as e:
+        print_error(f"Error creating psychologist profile: {str(e)}")
+        # Try to get existing profile
+        try:
+            profile = doctor.psychologist_profile
+            print_info(f"Using existing psychologist profile")
+        except:
+            print_error("Could not create or retrieve psychologist profile")
+            raise
     
     # Create test patient
     if not patient:
@@ -134,6 +148,28 @@ def get_or_create_test_users():
 
 def get_or_create_service(doctor):
     """Get or create test service"""
+    from services.models import PsychologistProfile
+    # Ensure psychologist profile exists
+    try:
+        profile = doctor.psychologist_profile
+    except PsychologistProfile.DoesNotExist:
+        from datetime import date, timedelta
+        PsychologistProfile.objects.get_or_create(
+            user=doctor,
+            defaults={
+                'ahpra_registration_number': f'PSY{doctor.id:06d}',  # Unique per doctor
+                'ahpra_expiry_date': date.today() + timedelta(days=365),
+                'consultation_fee': 180.00,
+                'medicare_rebate_amount': 87.45,
+                'years_experience': 10,
+                'bio': 'Experienced clinical psychologist specializing in anxiety and depression.',
+                'qualifications': 'PhD in Clinical Psychology',
+                'title': 'Dr',
+                'has_professional_indemnity_insurance': True
+            }
+        )
+        doctor.refresh_from_db()  # Refresh to get the profile
+    
     service = Service.objects.filter(
         psychologist=doctor.psychologist_profile,
         name__icontains='telehealth'
