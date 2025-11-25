@@ -86,14 +86,17 @@ def get_or_create_test_users():
     # Ensure psychologist profile exists (create if missing)
     from services.models import PsychologistProfile
     from datetime import date, timedelta
+    from decimal import Decimal, ROUND_HALF_UP
     try:
+        # Generate valid AHPRA number: PSY + 10 digits (e.g., PSY0000000001)
+        ahpra_number = f'PSY{doctor.id:010d}'  # Pad to 10 digits
         profile, created = PsychologistProfile.objects.get_or_create(
             user=doctor,
             defaults={
-                'ahpra_registration_number': f'PSY{doctor.id:06d}',  # Unique per doctor
+                'ahpra_registration_number': ahpra_number,
                 'ahpra_expiry_date': date.today() + timedelta(days=365),  # Expires in 1 year
-                'consultation_fee': 180.00,
-                'medicare_rebate_amount': 87.45,
+                'consultation_fee': Decimal('180.00'),
+                'medicare_rebate_amount': Decimal('87.45').quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
                 'years_experience': 10,
                 'bio': 'Experienced clinical psychologist specializing in anxiety and depression.',
                 'qualifications': 'PhD in Clinical Psychology',
@@ -154,13 +157,16 @@ def get_or_create_service(doctor):
         profile = doctor.psychologist_profile
     except PsychologistProfile.DoesNotExist:
         from datetime import date, timedelta
+        from decimal import Decimal, ROUND_HALF_UP
+        # Generate valid AHPRA number: PSY + 10 digits (e.g., PSY0000000001)
+        ahpra_number = f'PSY{doctor.id:010d}'  # Pad to 10 digits
         PsychologistProfile.objects.get_or_create(
             user=doctor,
             defaults={
-                'ahpra_registration_number': f'PSY{doctor.id:06d}',  # Unique per doctor
+                'ahpra_registration_number': ahpra_number,
                 'ahpra_expiry_date': date.today() + timedelta(days=365),
-                'consultation_fee': 180.00,
-                'medicare_rebate_amount': 87.45,
+                'consultation_fee': Decimal('180.00'),
+                'medicare_rebate_amount': Decimal('87.45').quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
                 'years_experience': 10,
                 'bio': 'Experienced clinical psychologist specializing in anxiety and depression.',
                 'qualifications': 'PhD in Clinical Psychology',
