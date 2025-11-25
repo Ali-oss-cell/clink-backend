@@ -176,22 +176,28 @@ def get_or_create_service(doctor):
         )
         doctor.refresh_from_db()  # Refresh to get the profile
     
+    # Services are clinic-wide, not tied to specific psychologist
     service = Service.objects.filter(
-        psychologist=doctor.psychologist_profile,
         name__icontains='telehealth'
     ).first()
     
     if not service:
         service = Service.objects.create(
-            psychologist=doctor.psychologist_profile,
             name='Telehealth Consultation',
             description='Online video consultation',
             duration_minutes=60,
-            price=180.00,
-            is_telehealth=True,
+            standard_fee=180.00,
+            medicare_rebate=87.45,
+            is_telehealth_available=True,
             is_active=True
         )
         print_success("Created test service: Telehealth Consultation")
+        
+        # Optionally add to psychologist's services_offered
+        if hasattr(doctor, 'psychologist_profile'):
+            doctor.psychologist_profile.services_offered.add(service)
+    else:
+        print_info(f"Using existing service: {service.name}")
     
     return service
 
