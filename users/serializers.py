@@ -38,13 +38,15 @@ class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
     psychologist_profile = serializers.SerializerMethodField()
+    patient_profile = serializers.SerializerMethodField()
     
     class Meta:
         model = User
         fields = [
             'id', 'email', 'username', 'first_name', 'last_name', 'full_name',
             'role', 'phone_number', 'date_of_birth', 'age', 'is_verified',
-            'is_active', 'created_at', 'last_login', 'psychologist_profile'
+            'is_active', 'created_at', 'last_login', 'psychologist_profile',
+            'patient_profile'
         ]
         read_only_fields = ['id', 'created_at', 'last_login']
     
@@ -61,6 +63,21 @@ class UserSerializer(serializers.ModelSerializer):
             try:
                 from services.serializers import PsychologistProfileSerializer
                 return PsychologistProfileSerializer(obj.psychologist_profile).data
+            except:
+                return None
+        return None
+    
+    def get_patient_profile(self, obj):
+        """Get patient profile if user is a patient"""
+        if obj.role == User.UserRole.PATIENT and hasattr(obj, 'patient_profile'):
+            try:
+                # Return basic patient profile info (not full intake form)
+                profile = obj.patient_profile
+                return {
+                    'intake_completed': profile.intake_completed,
+                    'emergency_contact_name': profile.emergency_contact_name,
+                    'emergency_contact_phone': profile.emergency_contact_phone,
+                }
             except:
                 return None
         return None
