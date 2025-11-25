@@ -322,9 +322,8 @@ def print_results(appointment, doctor, patient, tokens):
     
     print(f"\n{Colors.BOLD}Appointment Details:{Colors.ENDC}")
     print(f"  ID: {appointment.id}")
-    print(f"  Date: {appointment.appointment_date}")
-    print(f"  Time: {appointment.start_time}")
-    print(f"  Room: {appointment.video_room_id}")
+    print(f"  Date/Time: {appointment.appointment_date}")
+    print(f"  Room: {appointment.video_room_id if hasattr(appointment, 'video_room_id') else 'N/A'}")
     
     print(f"\n{Colors.BOLD}API Endpoints to Test:{Colors.ENDC}")
     print(f"\n  {Colors.OKCYAN}1. Get Doctor Token:{Colors.ENDC}")
