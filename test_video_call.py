@@ -216,17 +216,16 @@ def create_test_appointment(doctor, patient, service, minutes_from_now=5):
         patient=patient,
         psychologist=doctor,
         service=service,
-        appointment_date=appointment_time.date(),
-        start_time=appointment_time.time(),
+        appointment_date=appointment_time,  # DateTimeField, not separate date/time
         duration_minutes=60,
-        appointment_type='telehealth',
+        session_type='telehealth',  # session_type, not appointment_type
         status='confirmed',
         notes='Test video call appointment'
     )
     
     print_success(f"Created appointment ID: {appointment.id}")
-    print_success(f"Appointment date: {appointment.appointment_date}")
-    print_success(f"Appointment time: {appointment.start_time}")
+    print_success(f"Appointment date/time: {appointment.appointment_date}")
+    print_success(f"Session type: {appointment.session_type}")
     
     return appointment
 
