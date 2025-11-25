@@ -84,14 +84,16 @@ def get_or_create_test_users():
         
         # Create psychologist profile
         from users.models import PsychologistProfile
-        PsychologistProfile.objects.create(
+        PsychologistProfile.objects.get_or_create(
             user=doctor,
-            registration_number='PSY0001234',
-            specialization='Clinical Psychology',
-            consultation_fee=180.00,
-            medicare_rebate_amount=87.45,
-            years_of_experience=10,
-            bio='Experienced clinical psychologist specializing in anxiety and depression.'
+            defaults={
+                'registration_number': 'PSY0001234',
+                'specialization': 'Clinical Psychology',
+                'consultation_fee': 180.00,
+                'medicare_rebate_amount': 87.45,
+                'years_of_experience': 10,
+                'bio': 'Experienced clinical psychologist specializing in anxiety and depression.'
+            }
         )
         print_success(f"Created doctor: {doctor.get_full_name()} ({doctor.email})")
     
@@ -109,17 +111,19 @@ def get_or_create_test_users():
         
         # Create patient profile
         from users.models import PatientProfile
-        PatientProfile.objects.create(
+        PatientProfile.objects.get_or_create(
             user=patient,
-            date_of_birth='1990-01-15',
-            gender='male',
-            emergency_contact_name='Jane Smith',
-            emergency_contact_phone='+61412345679',
-            emergency_contact_relationship='spouse',
-            has_medicare=True,
-            medicare_number='1234567890',
-            medicare_irn='1',
-            medicare_expiry_date='2026-12-31'
+            defaults={
+                'date_of_birth': '1990-01-15',
+                'gender': 'male',
+                'emergency_contact_name': 'Jane Smith',
+                'emergency_contact_phone': '+61412345679',
+                'emergency_contact_relationship': 'spouse',
+                'has_medicare': True,
+                'medicare_number': '1234567890',
+                'medicare_irn': '1',
+                'medicare_expiry_date': '2026-12-31'
+            }
         )
         print_success(f"Created patient: {patient.get_full_name()} ({patient.email})")
     
