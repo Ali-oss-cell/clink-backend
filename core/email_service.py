@@ -18,6 +18,13 @@ try:
 except ImportError:
     SENDGRID_AVAILABLE = False
 
+# Requests for direct API calls (fallback)
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
 
 def send_email_via_sendgrid(to_email, subject, message, html_message=None):
     """
@@ -71,9 +78,82 @@ def send_email_via_sendgrid(to_email, subject, message, html_message=None):
             'method': 'sendgrid'
         }
     
+    except (socket.timeout, Exception) as e:
+        # If SendGrid library times out, try direct API call with requests
+        try:
+            return send_email_via_sendgrid_direct(to_email, subject, message, html_message)
+        except Exception:
+            # Final fallback to Django SMTP
+            return send_email_via_django(to_email, subject, message, html_message)
+
+
+def send_email_via_sendgrid_direct(to_email, subject, message, html_message=None):
+    """
+    Send email using SendGrid API directly via requests (fallback if library times out)
+    
+    Args:
+        to_email: Recipient email address
+        subject: Email subject
+        message: Plain text message
+        html_message: Optional HTML message
+    
+    Returns:
+        dict: Send result
+    """
+    sendgrid_api_key = getattr(settings, 'SENDGRID_API_KEY', None)
+    from_email = getattr(settings, 'SENDGRID_FROM_EMAIL', 'noreply@yourclinic.com.au')
+    from_name = getattr(settings, 'SENDGRID_FROM_NAME', 'Psychology Clinic')
+    
+    if not sendgrid_api_key:
+        raise ValueError("SENDGRID_API_KEY not configured")
+    
+    if not REQUESTS_AVAILABLE:
+        raise ImportError("requests library not available")
+    
+    try:
+        
+        url = "https://api.sendgrid.com/v3/mail/send"
+        headers = {
+            "Authorization": f"Bearer {sendgrid_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Build email data
+        email_data = {
+            "personalizations": [{"to": [{"email": to_email}]}],
+            "from": {"email": from_email, "name": from_name},
+            "subject": subject,
+            "content": []
+        }
+        
+        # Add content
+        if html_message:
+            email_data["content"].append({
+                "type": "text/html",
+                "value": html_message
+            })
+        email_data["content"].append({
+            "type": "text/plain",
+            "value": message
+        })
+        
+        # Send via requests with longer timeout
+        response = requests.post(url, headers=headers, json=email_data, timeout=60)
+        
+        if response.status_code in [200, 202]:
+            return {
+                'success': True,
+                'status_code': response.status_code,
+                'recipient': to_email,
+                'method': 'sendgrid_direct_api'
+            }
+        else:
+            raise Exception(f"SendGrid API error: {response.status_code} - {response.text}")
+            
+    except requests.exceptions.Timeout:
+        raise Exception("SendGrid API timeout (60 seconds)")
     except Exception as e:
-        # Fall back to Django SMTP on error
-        return send_email_via_django(to_email, subject, message, html_message)
+        raise Exception(f"SendGrid direct API error: {str(e)}")
 
 
 def send_email_via_django(to_email, subject, message, html_message=None):
