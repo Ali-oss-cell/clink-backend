@@ -54,6 +54,14 @@ app.conf.beat_schedule = {
         'task': 'users.tasks.check_deletion_requests_ready',
         'schedule': 86400.0,  # Run daily (24 hours = 86,400 seconds)
     },
+    'auto-complete-past-appointments': {
+        'task': 'appointments.tasks.auto_complete_past_appointments',
+        'schedule': 3600.0,  # Run every hour to check for past appointments
+    },
+    'cleanup-old-video-rooms': {
+        'task': 'appointments.tasks.cleanup_old_video_rooms',
+        'schedule': 86400.0,  # Run daily to clean up old video rooms
+    },
 }
 
 app.conf.timezone = settings.TIME_ZONE
