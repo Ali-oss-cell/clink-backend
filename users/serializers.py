@@ -147,6 +147,14 @@ class UserCreateSerializer(serializers.ModelSerializer):
             # as it requires AHPRA registration number and other professional details
             pass
         
+        # Send welcome email
+        try:
+            from core.email_service import send_welcome_email
+            send_welcome_email(user)
+        except Exception as e:
+            # Don't fail user creation if email fails
+            pass
+        
         return user
 
 
@@ -331,6 +339,14 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
         
         # Create patient profile
         PatientProfile.objects.create(user=user)
+        
+        # Send welcome email
+        try:
+            from core.email_service import send_welcome_email
+            send_welcome_email(user)
+        except Exception as e:
+            # Don't fail user creation if email fails
+            pass
         
         return user
 

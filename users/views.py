@@ -262,6 +262,14 @@ class AdminCreateUserView(APIView):
                 if services:
                     psychologist_profile.services_offered.set(services)
             
+            # Send welcome email
+            try:
+                from core.email_service import send_welcome_email
+                send_welcome_email(user)
+            except Exception as e:
+                # Don't fail user creation if email fails
+                pass
+            
             # Log user creation
             log_action(
                 user=request.user,

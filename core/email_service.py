@@ -1054,3 +1054,129 @@ Psychology Clinic Team
             'error': str(e)
         }
 
+
+def send_welcome_email(user):
+    """
+    Send welcome email to newly registered user
+    
+    Args:
+        user: User instance (newly created)
+    
+    Returns:
+        dict: Email send result
+    """
+    from django.conf import settings
+    from users.models import User
+    
+    user_name = user.get_full_name() or user.first_name or "there"
+    role_display = user.get_role_display()
+    
+    subject = f"Welcome to Tailored Psychology - Your Account is Ready!"
+    
+    # Customize message based on role
+    if user.role == User.UserRole.PATIENT:
+        message = f"""
+Hello {user_name},
+
+Welcome to Tailored Psychology! We're excited to have you as part of our community.
+
+Your account has been successfully created. Here's what you can do next:
+
+Getting Started:
+---------------
+1. Complete your intake form - This helps us understand your needs better
+2. Browse available psychologists - Find the right match for you
+3. Book your first appointment - Schedule a session that works for you
+4. Access your dashboard - View appointments, progress notes, and resources
+
+Your Account Details:
+--------------------
+Email: {user.email}
+Role: {role_display}
+
+Need Help?
+----------
+If you have any questions or need assistance, please don't hesitate to contact us.
+
+We're here to support you on your journey to better mental health.
+
+Welcome aboard!
+
+Best regards,
+The Tailored Psychology Team
+"""
+    elif user.role == User.UserRole.PSYCHOLOGIST:
+        message = f"""
+Hello Dr. {user.last_name or user_name},
+
+Welcome to Tailored Psychology! We're thrilled to have you join our team.
+
+Your account has been successfully created. Here's what you can do next:
+
+Getting Started:
+---------------
+1. Complete your psychologist profile - Add your AHPRA details and qualifications
+2. Set your availability - Let patients know when you're available
+3. Review your dashboard - Access patient information and appointments
+4. Start seeing patients - Begin your practice with us
+
+Your Account Details:
+--------------------
+Email: {user.email}
+Role: {role_display}
+
+Important:
+----------
+Please ensure your AHPRA registration and professional indemnity insurance are up to date in your profile.
+
+If you have any questions or need assistance, please contact the practice manager.
+
+Welcome to the team!
+
+Best regards,
+The Tailored Psychology Team
+"""
+    else:
+        # For practice managers and admins
+        message = f"""
+Hello {user_name},
+
+Welcome to Tailored Psychology! Your account has been successfully created.
+
+Your Account Details:
+--------------------
+Email: {user.email}
+Role: {role_display}
+
+You now have access to the administrative dashboard where you can:
+- Manage users and appointments
+- View system analytics
+- Handle billing and payments
+- Monitor system health
+
+If you have any questions, please don't hesitate to reach out.
+
+Welcome aboard!
+
+Best regards,
+The Tailored Psychology Team
+"""
+    
+    try:
+        result = send_email_via_sendgrid(
+            to_email=user.email,
+            subject=subject,
+            message=message
+        )
+        
+        result['type'] = 'welcome_email'
+        result['user_id'] = user.id
+        return result
+    
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'type': 'welcome_email'
+        }
+
