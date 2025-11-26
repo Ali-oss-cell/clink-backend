@@ -26,7 +26,13 @@ STRIPE_WEBHOOK_SECRET=whsec_your-webhook-secret
 # Redis Configuration (for Celery)
 REDIS_URL=redis://localhost:6379/0
 
-# Email Configuration
+# Email Configuration (SendGrid via Twilio)
+# Get API key from: https://app.sendgrid.com → Settings → API Keys
+SENDGRID_API_KEY=your-sendgrid-api-key-here
+SENDGRID_FROM_EMAIL=noreply@tailoredpsychology.com.au
+SENDGRID_FROM_NAME=Tailored Psychology
+
+# Fallback SMTP (optional - only used if SendGrid not configured)
 EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
 EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587

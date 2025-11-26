@@ -55,8 +55,14 @@ def send_email_via_sendgrid(to_email, subject, message, html_message=None):
         
         mail = Mail(from_email, to_email_obj, subject, content)
         
-        # Send email
-        response = sg.send(mail)
+        # Send email with timeout handling
+        import socket
+        original_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(30)  # 30 second timeout
+        try:
+            response = sg.send(mail)
+        finally:
+            socket.setdefaulttimeout(original_timeout)  # Restore original timeout
         
         return {
             'success': True,
