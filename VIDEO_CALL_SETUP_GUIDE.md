@@ -206,7 +206,7 @@ access_token = video_service.generate_access_token(
 
 ### Test Token Generation:
 
-```bash
+   ```bash
 # Get appointment ID first
 curl -X GET https://api.tailoredpsychology.com.au/api/appointments/ \
   -H "Authorization: Bearer YOUR_PATIENT_TOKEN" \
