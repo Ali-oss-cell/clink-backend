@@ -1163,6 +1163,11 @@ The Tailored Psychology Team
 """
     
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"Attempting to send welcome email to {user.email} (user_id: {user.id}, role: {user.role})")
+        
         result = send_email_via_sendgrid(
             to_email=user.email,
             subject=subject,
@@ -1171,12 +1176,23 @@ The Tailored Psychology Team
         
         result['type'] = 'welcome_email'
         result['user_id'] = user.id
+        
+        if result.get('success'):
+            logger.info(f"Welcome email sent successfully to {user.email} (status: {result.get('status_code')})")
+        else:
+            logger.error(f"Welcome email failed for {user.email}: {result.get('error', 'Unknown error')}")
+        
         return result
     
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Exception in send_welcome_email for {user.email}: {str(e)}", exc_info=True)
+        
         return {
             'success': False,
             'error': str(e),
-            'type': 'welcome_email'
+            'type': 'welcome_email',
+            'user_id': user.id
         }
 
