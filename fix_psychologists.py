@@ -115,7 +115,7 @@ def create_profile_for_psychologist(user, ahpra_number=None, ahpra_expiry_date=N
             ahpra_registration_number=ahpra_number,
             ahpra_expiry_date=ahpra_expiry_date,
             title='Dr',
-            qualifications='',
+            qualifications='Registered Psychologist',  # Required field - provide default
             years_experience=0,
             consultation_fee=Decimal('180.00'),
             medicare_rebate_amount=Decimal('87.45'),
