@@ -81,6 +81,8 @@ urlpatterns = [
 
 # Separate URL patterns for /api/users/ endpoint
 users_urlpatterns = [
-    # User ViewSet at root
+    # Intake form (MUST come before router to avoid conflicts)
+    path('intake-form/', views.IntakeFormView.as_view(), name='intake-form-users'),
+    # User ViewSet at root (must come after specific paths)
     path('', include(users_router.urls)),
 ]
