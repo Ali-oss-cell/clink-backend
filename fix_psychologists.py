@@ -110,6 +110,8 @@ def create_profile_for_psychologist(user, ahpra_number=None, ahpra_expiry_date=N
     
     # Create the profile
     try:
+        from datetime import time as dt_time
+        
         profile = PsychologistProfile.objects.create(
             user=user,
             ahpra_registration_number=ahpra_number,
@@ -124,7 +126,13 @@ def create_profile_for_psychologist(user, ahpra_number=None, ahpra_expiry_date=N
             is_accepting_new_patients=True,
             is_active_practitioner=True,
             telehealth_available=True,
-            in_person_available=True
+            in_person_available=True,
+            # Working hours - REQUIRED for time slots to be generated
+            working_days='Monday,Tuesday,Wednesday,Thursday,Friday',  # Default: Mon-Fri
+            start_time=dt_time(9, 0),  # Default: 9:00 AM
+            end_time=dt_time(17, 0),  # Default: 5:00 PM
+            session_duration_minutes=50,  # Default: 50 minutes
+            break_between_sessions_minutes=10  # Default: 10 minutes break
         )
         
         print(f"✅ Profile created successfully!")
