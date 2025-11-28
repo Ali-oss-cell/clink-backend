@@ -206,8 +206,11 @@ class PsychologistProfileCreateSerializer(serializers.ModelSerializer):
 class PsychologistProfileUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating psychologist profiles - editable fields only"""
     
-    # Allow working_days to accept both array and string
+    # Allow comma-separated fields to accept both array and string
     working_days = serializers.CharField(required=False, allow_blank=True)
+    languages_spoken = serializers.CharField(required=False, allow_blank=True)
+    session_types = serializers.CharField(required=False, allow_blank=True)
+    insurance_providers = serializers.CharField(required=False, allow_blank=True)
     
     class Meta:
         model = PsychologistProfile
@@ -222,7 +225,7 @@ class PsychologistProfileUpdateSerializer(serializers.ModelSerializer):
             'languages_spoken', 'session_types',
             
             # Insurance & Billing (Editable)
-            'insurance_providers', 'billing_methods', 'medicare_rebate_amount',
+            'insurance_providers', 'medicare_rebate_amount',
             
             # Availability (Editable)
             'working_hours', 'working_days', 'start_time', 'end_time',
@@ -237,9 +240,27 @@ class PsychologistProfileUpdateSerializer(serializers.ModelSerializer):
     def validate_working_days(self, value):
         """Convert array to comma-separated string if needed"""
         if isinstance(value, list):
-            # Convert array to comma-separated string
             return ','.join(str(day).strip() for day in value if day)
         return value
+    
+    def validate_languages_spoken(self, value):
+        """Convert array to comma-separated string if needed"""
+        if isinstance(value, list):
+            return ','.join(str(lang).strip() for lang in value if lang)
+        return value
+    
+    def validate_session_types(self, value):
+        """Convert array to comma-separated string if needed"""
+        if isinstance(value, list):
+            return ','.join(str(stype).strip() for stype in value if stype)
+        return value
+    
+    def validate_insurance_providers(self, value):
+        """Convert array to comma-separated string if needed"""
+        if isinstance(value, list):
+            return ','.join(str(provider).strip() for provider in value if provider)
+        return value
+    
     
     def update(self, instance, validated_data):
         """Update psychologist profile"""
