@@ -479,10 +479,16 @@ class BookAppointmentEnhancedView(APIView):
         
         # Get service
         try:
-            service = Service.objects.get(id=service_id)
+            service = Service.objects.get(id=service_id, is_active=True)
         except Service.DoesNotExist:
+            # Provide helpful error message
+            available_services = Service.objects.filter(is_active=True).values('id', 'name')
             return Response(
-                {'error': 'Service not found'},
+                {
+                    'error': f'Service with ID {service_id} not found or is inactive',
+                    'available_services': list(available_services),
+                    'service_id_provided': service_id
+                },
                 status=status.HTTP_404_NOT_FOUND
             )
         
