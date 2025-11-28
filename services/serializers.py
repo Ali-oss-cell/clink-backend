@@ -206,6 +206,9 @@ class PsychologistProfileCreateSerializer(serializers.ModelSerializer):
 class PsychologistProfileUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating psychologist profiles - editable fields only"""
     
+    # Allow working_days to accept both array and string
+    working_days = serializers.CharField(required=False, allow_blank=True)
+    
     class Meta:
         model = PsychologistProfile
         fields = [
@@ -230,6 +233,13 @@ class PsychologistProfileUpdateSerializer(serializers.ModelSerializer):
             'profile_image', 'specializations', 'services_offered',
             'is_accepting_new_patients', 'max_patients_per_day', 'is_active_practitioner'
         ]
+    
+    def validate_working_days(self, value):
+        """Convert array to comma-separated string if needed"""
+        if isinstance(value, list):
+            # Convert array to comma-separated string
+            return ','.join(str(day).strip() for day in value if day)
+        return value
     
     def update(self, instance, validated_data):
         """Update psychologist profile"""
