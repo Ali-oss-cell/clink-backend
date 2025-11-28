@@ -644,6 +644,37 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             )
         return value
     
+    def to_internal_value(self, data):
+        """
+        Convert array inputs to proper types for boolean fields
+        Frontend sometimes sends booleans as arrays [true] or [false]
+        """
+        # List of all boolean fields in the intake form
+        boolean_fields = [
+            'has_gp_referral', 'previous_therapy', 'current_medications',
+            'other_health_professionals', 'medical_conditions',
+            'consent_to_treatment', 'consent_to_telehealth',
+            'telehealth_emergency_protocol_acknowledged',
+            'telehealth_tech_requirements_acknowledged',
+            'telehealth_recording_consent', 'privacy_policy_accepted',
+            'consent_to_data_sharing', 'consent_to_marketing',
+            'consent_withdrawn', 'email_notifications_enabled',
+            'sms_notifications_enabled', 'appointment_reminders_enabled',
+            'share_progress_with_emergency_contact', 'parental_consent',
+            'intake_completed'
+        ]
+        
+        # Convert array booleans to actual booleans
+        for field in boolean_fields:
+            if field in data and isinstance(data[field], list):
+                # If it's an array, take the first element
+                if len(data[field]) > 0:
+                    data[field] = bool(data[field][0])
+                else:
+                    data[field] = False
+        
+        return super().to_internal_value(data)
+    
     def validate(self, attrs):
         """Cross-field validation"""
         # Check if GP referral details are provided when has_gp_referral is True

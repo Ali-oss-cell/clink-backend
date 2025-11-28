@@ -627,6 +627,7 @@ class IntakeFormView(APIView):
     """Digital intake form for patients"""
     
     permission_classes = [IsAuthenticated]
+    http_method_names = ['get', 'post', 'put', 'patch', 'head', 'options']
     
     def get(self, request):
         """Get patient's intake form data"""
