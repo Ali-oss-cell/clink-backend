@@ -210,9 +210,10 @@ class PsychologistAvailableTimeSlotsView(APIView):
         else:
             end_date = start_date + timedelta(days=30)
         
-        # Validate dates
-        if start_date < timezone.now().date():
-            start_date = timezone.now().date()
+        # Validate dates - start from tomorrow (not today)
+        tomorrow = timezone.now().date() + timedelta(days=1)
+        if start_date < tomorrow:
+            start_date = tomorrow
         
         if end_date < start_date:
             return Response(
@@ -260,10 +261,15 @@ class PsychologistAvailableTimeSlotsView(APIView):
             end_date
         )
         
-        # Filter available slots
+        # Filter available slots - only show slots from tomorrow onwards
+        tomorrow_start = timezone.datetime.combine(
+            timezone.now().date() + timedelta(days=1),
+            timezone.datetime.min.time()
+        ).replace(tzinfo=timezone.get_current_timezone())
+        
         available_slots = time_slots.filter(
             is_available=True,
-            start_time__gte=timezone.now()
+            start_time__gte=tomorrow_start
         ).order_by('start_time')
         
         # Group slots by date
@@ -366,17 +372,23 @@ class CalendarAvailabilityView(APIView):
         start_date = datetime(year, month, 1).date()
         end_date = datetime(year, month, last_day).date()
         
-        # Ensure we don't query past dates
-        if start_date < now.date():
-            start_date = now.date()
+        # Ensure we don't query past dates - start from tomorrow
+        tomorrow = now.date() + timedelta(days=1)
+        if start_date < tomorrow:
+            start_date = tomorrow
         
-        # Get time slots for the month
+        # Get time slots for the month - only from tomorrow onwards
+        tomorrow_start = timezone.datetime.combine(
+            tomorrow,
+            timezone.datetime.min.time()
+        ).replace(tzinfo=timezone.get_current_timezone())
+        
         time_slots = TimeSlot.objects.filter(
             psychologist=psychologist,
             date__gte=start_date,
             date__lte=end_date,
             is_available=True,
-            start_time__gte=now
+            start_time__gte=tomorrow_start
         ).values('date').distinct()
         
         available_dates = [slot['date'].isoformat() for slot in time_slots]
