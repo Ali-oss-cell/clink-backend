@@ -731,6 +731,47 @@ def send_ahpra_expired_notification(psychologist_profile_id):
         return {'error': str(e)}
 
 
+@shared_task(name='appointments.generate_time_slots')
+def generate_time_slots(days_ahead=90):
+    """
+    Generate time slots for all active psychologists
+    
+    Runs daily to ensure slots are available for booking
+    
+    Args:
+        days_ahead: How many days ahead to generate slots (default: 90)
+    
+    Returns:
+        dict: Statistics on slots generated
+    """
+    from .time_slot_manager import TimeSlotManager
+    
+    stats = TimeSlotManager.generate_slots_for_all_psychologists(days_ahead=days_ahead)
+    
+    return stats
+
+
+@shared_task(name='appointments.cleanup_past_time_slots')
+def cleanup_past_time_slots(days_old=7):
+    """
+    Clean up old time slots to keep database clean
+    
+    Args:
+        days_old: Delete slots older than this many days (default: 7)
+    
+    Returns:
+        dict: Cleanup statistics
+    """
+    from .time_slot_manager import TimeSlotManager
+    
+    deleted_count = TimeSlotManager.cleanup_past_slots(days_old=days_old)
+    
+    return {
+        'slots_deleted': deleted_count,
+        'days_old': days_old
+    }
+
+
 def cancel_future_appointments_for_psychologist(psychologist):
     """
     Cancel all future appointments for a psychologist (when AHPRA expires)

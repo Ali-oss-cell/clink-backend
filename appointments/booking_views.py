@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, time as dt_time
 from .models import Appointment, AvailabilitySlot, TimeSlot
 from services.models import PsychologistProfile, Service
 from .serializers import AppointmentSerializer, TimeSlotSerializer
+from .time_slot_manager import TimeSlotManager
 from audit.utils import log_action
 
 User = get_user_model()
@@ -252,10 +253,9 @@ class PsychologistAvailableTimeSlotsView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
         
-        # Generate or retrieve time slots
-        time_slots = self._get_or_generate_time_slots(
+        # Generate or retrieve time slots using improved manager
+        time_slots = TimeSlotManager.generate_slots_for_psychologist(
             psychologist, 
-            psychologist_profile, 
             start_date, 
             end_date
         )
@@ -307,91 +307,6 @@ class PsychologistAvailableTimeSlotsView(APIView):
             'total_available_slots': available_slots.count()
         })
     
-    def _get_or_generate_time_slots(self, psychologist, profile, start_date, end_date):
-        """
-        Get existing time slots or generate them from availability pattern
-        """
-        # Check if we have time slots in this range
-        existing_slots = TimeSlot.objects.filter(
-            psychologist=psychologist,
-            date__gte=start_date,
-            date__lte=end_date
-        )
-        
-        if existing_slots.exists():
-            return existing_slots
-        
-        # Generate time slots from working hours
-        if not profile.working_days or not profile.start_time or not profile.end_time:
-            # Return empty queryset if no working hours defined
-            return TimeSlot.objects.none()
-        
-        # Generate time slots
-        working_days_list = [day.strip() for day in profile.working_days.split(',')]
-        day_name_to_number = {
-            'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3,
-            'Friday': 4, 'Saturday': 5, 'Sunday': 6
-        }
-        
-        working_day_numbers = [
-            day_name_to_number.get(day) 
-            for day in working_days_list 
-            if day in day_name_to_number
-        ]
-        
-        # Generate slots for each day in range
-        current_date = start_date
-        session_duration = profile.session_duration_minutes
-        break_duration = profile.break_between_sessions_minutes
-        
-        while current_date <= end_date:
-            # Check if this is a working day
-            if current_date.weekday() in working_day_numbers:
-                # Generate time slots for this day
-                current_time = profile.start_time
-                end_time = profile.end_time
-                
-                while current_time < end_time:
-                    # Calculate end time for this slot
-                    start_datetime = timezone.datetime.combine(
-                        current_date, current_time
-                    ).replace(tzinfo=timezone.get_current_timezone())
-                    
-                    # Add session duration
-                    end_datetime = start_datetime + timedelta(minutes=session_duration)
-                    
-                    # Check if end time exceeds working hours
-                    if end_datetime.time() > end_time:
-                        break
-                    
-                    # Skip if in the past
-                    if start_datetime > timezone.now():
-                        # Create time slot
-                        TimeSlot.objects.get_or_create(
-                            psychologist=psychologist,
-                            start_time=start_datetime,
-                            defaults={
-                                'date': current_date,
-                                'end_time': end_datetime,
-                                'is_available': True
-                            }
-                        )
-                    
-                    # Move to next slot (session duration + break)
-                    total_minutes = session_duration + break_duration
-                    current_time = (
-                        datetime.combine(current_date, current_time) + 
-                        timedelta(minutes=total_minutes)
-                    ).time()
-            
-            current_date += timedelta(days=1)
-        
-        # Return the generated/existing slots
-        return TimeSlot.objects.filter(
-            psychologist=psychologist,
-            date__gte=start_date,
-            date__lte=end_date
-        )
 
 
 class CalendarAvailabilityView(APIView):
@@ -549,12 +464,11 @@ class BookAppointmentEnhancedView(APIView):
         try:
             time_slot = TimeSlot.objects.get(
                 id=time_slot_id,
-                psychologist=psychologist,
-                is_available=True
+                psychologist=psychologist
             )
         except TimeSlot.DoesNotExist:
             return Response(
-                {'error': 'Time slot not found or no longer available'},
+                {'error': 'Time slot not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
         
@@ -562,6 +476,19 @@ class BookAppointmentEnhancedView(APIView):
         if time_slot.start_time <= timezone.now():
             return Response(
                 {'error': 'Cannot book appointments in the past'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check availability using improved manager
+        is_available, conflict_reason = TimeSlotManager.check_slot_availability(
+            psychologist,
+            time_slot.start_time,
+            time_slot.end_time
+        )
+        
+        if not is_available:
+            return Response(
+                {'error': conflict_reason or 'Time slot is not available'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -613,10 +540,8 @@ class BookAppointmentEnhancedView(APIView):
                 status='scheduled'
             )
             
-            # Mark time slot as booked
-            time_slot.is_available = False
-            time_slot.appointment = appointment
-            time_slot.save()
+            # Mark time slot as booked using improved manager
+            TimeSlotManager.mark_slot_as_booked(time_slot, appointment)
             
             # Log appointment creation
             log_action(

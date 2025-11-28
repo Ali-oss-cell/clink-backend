@@ -409,12 +409,11 @@ class CancelAppointmentView(APIView):
             appointment.notes = request.data.get('notes', '')
             appointment.save()
             
-            # Free up the time slot
+            # Free up the time slot using improved manager
+            from .time_slot_manager import TimeSlotManager
             time_slot = TimeSlot.objects.filter(appointment=appointment).first()
             if time_slot:
-                time_slot.is_available = True
-                time_slot.appointment = None
-                time_slot.save()
+                TimeSlotManager.mark_slot_as_available(time_slot)
             
             serializer = AppointmentSerializer(appointment)
             return Response({
