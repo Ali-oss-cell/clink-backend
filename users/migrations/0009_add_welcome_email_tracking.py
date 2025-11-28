@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('users', '0002_auto_previous'),  # Adjust this to your last migration
+        ('users', '0008_add_patient_preferences'),
     ]
 
     operations = [
