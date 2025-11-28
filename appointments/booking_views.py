@@ -292,8 +292,22 @@ class PsychologistAvailableTimeSlotsView(APIView):
                 'is_available': slot.is_available
             })
         
+        # Ensure tomorrow is included even if it has no slots
+        tomorrow = timezone.now().date() + timedelta(days=1)
+        tomorrow_key = tomorrow.isoformat()
+        
+        if tomorrow_key not in slots_by_date and tomorrow <= end_date:
+            slots_by_date[tomorrow_key] = {
+                'date': tomorrow_key,
+                'day_name': tomorrow.strftime('%A'),
+                'slots': []
+            }
+        
         # Convert to sorted list
         available_dates = sorted(slots_by_date.values(), key=lambda x: x['date'])
+        
+        # Update start_date to reflect actual start (tomorrow)
+        actual_start_date = tomorrow if tomorrow <= end_date else start_date
         
         return Response({
             'psychologist_id': psychologist_id,
@@ -306,7 +320,7 @@ class PsychologistAvailableTimeSlotsView(APIView):
             'medicare_rebate_amount': str(psychologist_profile.medicare_rebate_amount),
             'patient_cost_after_rebate': psychologist_profile.patient_cost_after_rebate,
             'date_range': {
-                'start_date': start_date.isoformat(),
+                'start_date': actual_start_date.isoformat(),
                 'end_date': end_date.isoformat()
             },
             'available_dates': available_dates,
