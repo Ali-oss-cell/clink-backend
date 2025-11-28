@@ -2469,9 +2469,18 @@ class TelehealthConsentView(APIView):
         return Response({
             'message': 'Telehealth consent updated successfully',
             'consent_to_telehealth': patient_profile.consent_to_telehealth,
+            'telehealth_consent_version': patient_profile.consent_to_telehealth_version,
+            'telehealth_consent_date': patient_profile.consent_to_telehealth_date.isoformat() if patient_profile.consent_to_telehealth_date else None,
             'telehealth_emergency_protocol_acknowledged': patient_profile.telehealth_emergency_protocol_acknowledged,
+            'telehealth_emergency_acknowledged_date': patient_profile.telehealth_emergency_acknowledged_date.isoformat() if patient_profile.telehealth_emergency_acknowledged_date else None,
+            'telehealth_emergency_contact': patient_profile.telehealth_emergency_contact,
+            'telehealth_emergency_plan': patient_profile.telehealth_emergency_plan,
             'telehealth_tech_requirements_acknowledged': patient_profile.telehealth_tech_requirements_acknowledged,
-            'telehealth_recording_consent': patient_profile.telehealth_recording_consent
+            'telehealth_tech_acknowledged_date': patient_profile.telehealth_tech_acknowledged_date.isoformat() if patient_profile.telehealth_tech_acknowledged_date else None,
+            'telehealth_recording_consent': patient_profile.telehealth_recording_consent,
+            'telehealth_recording_consent_date': patient_profile.telehealth_recording_consent_date.isoformat() if patient_profile.telehealth_recording_consent_date else None,
+            'telehealth_recording_consent_version': patient_profile.telehealth_recording_consent_version or getattr(settings, 'TELEHEALTH_RECORDING_CONSENT_VERSION', '1.0'),
+            'updated_at': patient_profile.updated_at.isoformat() if hasattr(patient_profile, 'updated_at') and patient_profile.updated_at else None
         }, status=status.HTTP_200_OK)
 
 
