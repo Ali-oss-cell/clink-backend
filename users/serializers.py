@@ -457,6 +457,28 @@ class IntakeFormSerializer(serializers.ModelSerializer):
     postcode = serializers.CharField(required=True)
     medicare_number = serializers.CharField(required=False, allow_blank=True)
     
+    # Boolean fields with array handling (frontend sends [true] instead of true)
+    has_gp_referral = serializers.BooleanField(required=False, allow_null=True)
+    previous_therapy = serializers.BooleanField(required=False, allow_null=True)
+    current_medications = serializers.BooleanField(required=False, allow_null=True)
+    other_health_professionals = serializers.BooleanField(required=False, allow_null=True)
+    medical_conditions = serializers.BooleanField(required=False, allow_null=True)
+    consent_to_treatment = serializers.BooleanField(required=True)
+    consent_to_telehealth = serializers.BooleanField(required=False, allow_null=True)
+    telehealth_emergency_protocol_acknowledged = serializers.BooleanField(required=False, allow_null=True)
+    telehealth_tech_requirements_acknowledged = serializers.BooleanField(required=False, allow_null=True)
+    telehealth_recording_consent = serializers.BooleanField(required=False, allow_null=True)
+    privacy_policy_accepted = serializers.BooleanField(required=True)
+    consent_to_data_sharing = serializers.BooleanField(required=False, allow_null=True)
+    consent_to_marketing = serializers.BooleanField(required=False, allow_null=True)
+    consent_withdrawn = serializers.BooleanField(required=False, allow_null=True)
+    email_notifications_enabled = serializers.BooleanField(required=False, allow_null=True)
+    sms_notifications_enabled = serializers.BooleanField(required=False, allow_null=True)
+    appointment_reminders_enabled = serializers.BooleanField(required=False, allow_null=True)
+    share_progress_with_emergency_contact = serializers.BooleanField(required=False, allow_null=True)
+    parental_consent = serializers.BooleanField(required=False, allow_null=True)
+    intake_completed = serializers.BooleanField(required=False, allow_null=True)
+    
     class Meta:
         model = PatientProfile
         fields = [
@@ -636,19 +658,57 @@ class IntakeFormSerializer(serializers.ModelSerializer):
             )
         return value
     
+    def validate_has_gp_referral(self, value):
+        """Handle array input for has_gp_referral"""
+        if isinstance(value, list):
+            return bool(value[0]) if len(value) > 0 else False
+        return bool(value) if value is not None else False
+    
+    def validate_previous_therapy(self, value):
+        """Handle array input for previous_therapy"""
+        if isinstance(value, list):
+            return bool(value[0]) if len(value) > 0 else False
+        return bool(value) if value is not None else False
+    
+    def validate_current_medications(self, value):
+        """Handle array input for current_medications"""
+        if isinstance(value, list):
+            return bool(value[0]) if len(value) > 0 else False
+        return bool(value) if value is not None else False
+    
+    def validate_other_health_professionals(self, value):
+        """Handle array input for other_health_professionals"""
+        if isinstance(value, list):
+            return bool(value[0]) if len(value) > 0 else False
+        return bool(value) if value is not None else False
+    
+    def validate_medical_conditions(self, value):
+        """Handle array input for medical_conditions"""
+        if isinstance(value, list):
+            return bool(value[0]) if len(value) > 0 else False
+        return bool(value) if value is not None else False
+    
     def validate_consent_to_treatment(self, value):
-        """Validate consent to treatment is given"""
+        """Validate consent to treatment is given and handle array input"""
+        if isinstance(value, list):
+            value = bool(value[0]) if len(value) > 0 else False
         if not value:
             raise serializers.ValidationError(
                 "Consent to treatment is required to proceed"
             )
-        return value
+        return bool(value)
     
     def to_internal_value(self, data):
         """
         Convert array inputs to proper types for boolean fields
         Frontend sometimes sends booleans as arrays [true] or [false]
         """
+        # Make a copy to avoid modifying the original
+        if isinstance(data, dict):
+            data = data.copy()
+        else:
+            data = dict(data)
+        
         # List of all boolean fields in the intake form
         boolean_fields = [
             'has_gp_referral', 'previous_therapy', 'current_medications',
@@ -666,12 +726,21 @@ class IntakeFormSerializer(serializers.ModelSerializer):
         
         # Convert array booleans to actual booleans
         for field in boolean_fields:
-            if field in data and isinstance(data[field], list):
-                # If it's an array, take the first element
-                if len(data[field]) > 0:
-                    data[field] = bool(data[field][0])
+            if field in data:
+                value = data[field]
+                # Handle array inputs
+                if isinstance(value, list):
+                    if len(value) > 0:
+                        # Take first element and convert to boolean
+                        data[field] = bool(value[0])
+                    else:
+                        data[field] = False
+                # Handle None/null
+                elif value is None:
+                    data[field] = None
+                # Ensure it's a boolean
                 else:
-                    data[field] = False
+                    data[field] = bool(value)
         
         return super().to_internal_value(data)
     
