@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('users', '0008_add_patient_preferences'),
+        ('users', '0009_alter_user_managers'),  # Depends on the existing 0009
     ]
 
     operations = [
