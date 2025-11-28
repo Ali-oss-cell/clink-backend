@@ -59,6 +59,12 @@ class User(AbstractUser):
         help_text="Email verification status - required for full system access"
     )
     
+    # Welcome email tracking
+    welcome_email_sent = models.BooleanField(default=False, help_text="Whether welcome email was successfully sent")
+    welcome_email_sent_at = models.DateTimeField(null=True, blank=True, help_text="When welcome email was sent")
+    welcome_email_attempts = models.IntegerField(default=0, help_text="Number of attempts to send welcome email")
+    welcome_email_last_error = models.TextField(blank=True, null=True, help_text="Last error when sending welcome email")
+    
     # Profile Information
     date_of_birth = models.DateField(
         null=True, 

@@ -150,10 +150,32 @@ class UserCreateSerializer(serializers.ModelSerializer):
         # Send welcome email
         try:
             from core.email_service import send_welcome_email
-            send_welcome_email(user)
+            from django.utils import timezone
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            user.welcome_email_attempts += 1
+            result = send_welcome_email(user)
+            
+            if result.get('success'):
+                user.welcome_email_sent = True
+                user.welcome_email_sent_at = timezone.now()
+                user.welcome_email_last_error = None
+                user.save()
+                logger.info(f"Welcome email sent successfully to {user.email}")
+            else:
+                user.welcome_email_sent = False
+                user.welcome_email_last_error = result.get('error', 'Unknown error')
+                user.save()
+                logger.error(f"Welcome email failed for {user.email}: {result.get('error', 'Unknown error')}")
         except Exception as e:
-            # Don't fail user creation if email fails
-            pass
+            # Don't fail user creation if email fails, but log the error
+            import logging
+            from django.utils import timezone
+            logger = logging.getLogger(__name__)
+            user.welcome_email_last_error = str(e)
+            user.save()
+            logger.error(f"Exception sending welcome email to {user.email}: {str(e)}", exc_info=True)
         
         return user
 
@@ -343,10 +365,32 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
         # Send welcome email
         try:
             from core.email_service import send_welcome_email
-            send_welcome_email(user)
+            from django.utils import timezone
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            user.welcome_email_attempts += 1
+            result = send_welcome_email(user)
+            
+            if result.get('success'):
+                user.welcome_email_sent = True
+                user.welcome_email_sent_at = timezone.now()
+                user.welcome_email_last_error = None
+                user.save()
+                logger.info(f"Welcome email sent successfully to {user.email}")
+            else:
+                user.welcome_email_sent = False
+                user.welcome_email_last_error = result.get('error', 'Unknown error')
+                user.save()
+                logger.error(f"Welcome email failed for {user.email}: {result.get('error', 'Unknown error')}")
         except Exception as e:
-            # Don't fail user creation if email fails
-            pass
+            # Don't fail user creation if email fails, but log the error
+            import logging
+            from django.utils import timezone
+            logger = logging.getLogger(__name__)
+            user.welcome_email_last_error = str(e)
+            user.save()
+            logger.error(f"Exception sending welcome email to {user.email}: {str(e)}", exc_info=True)
         
         return user
 
