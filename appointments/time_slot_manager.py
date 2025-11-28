@@ -87,6 +87,11 @@ class TimeSlotManager:
         break_duration = profile.break_between_sessions_minutes
         slots_created = 0
         now = timezone.now()
+        tomorrow = now.date() + timedelta(days=1)
+        
+        # Ensure we start from tomorrow (not today)
+        if start_date < tomorrow:
+            start_date = tomorrow
         
         current_date = start_date
         while current_date <= end_date:
@@ -108,8 +113,8 @@ class TimeSlotManager:
                     if end_datetime.time() > end_time:
                         break
                     
-                    # Skip if in the past
-                    if start_datetime <= now:
+                    # Skip if in the past or today (only show from tomorrow)
+                    if start_datetime.date() < tomorrow:
                         # Move to next slot
                         total_minutes = session_duration + break_duration
                         current_time = (
