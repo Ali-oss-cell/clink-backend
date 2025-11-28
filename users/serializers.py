@@ -143,9 +143,78 @@ class UserCreateSerializer(serializers.ModelSerializer):
             from .models import PatientProfile
             PatientProfile.objects.create(user=user)
         elif role == User.UserRole.PSYCHOLOGIST:
-            # Note: Psychologist profile should be created separately via psychologist profile endpoint
-            # as it requires AHPRA registration number and other professional details
-            pass
+            # Create psychologist profile - AHPRA required
+            # Get AHPRA from initial_data (not validated_data, as it's not in model fields)
+            from services.models import PsychologistProfile
+            from datetime import date, timedelta, datetime
+            from decimal import Decimal
+            
+            initial_data = self.initial_data
+            ahpra_registration_number = initial_data.get('ahpra_registration_number')
+            ahpra_expiry_date = initial_data.get('ahpra_expiry_date')
+            
+            # Require AHPRA for psychologists (consistent with AdminCreateUserView)
+            if not ahpra_registration_number:
+                raise serializers.ValidationError({
+                    'ahpra_registration_number': 'AHPRA registration number is required for psychologists'
+                })
+            
+            # Validate AHPRA number format
+            is_valid, result = validate_ahpra_number_format(ahpra_registration_number, 'psychologist')
+            if not is_valid:
+                raise serializers.ValidationError({
+                    'ahpra_registration_number': result
+                })
+            
+            # Use normalized value
+            ahpra_registration_number = result
+            
+            if not ahpra_expiry_date:
+                raise serializers.ValidationError({
+                    'ahpra_expiry_date': 'AHPRA expiry date is required for psychologists'
+                })
+            
+            # Parse AHPRA expiry date
+            try:
+                if isinstance(ahpra_expiry_date, str):
+                    expiry_date = datetime.strptime(ahpra_expiry_date, '%Y-%m-%d').date()
+                else:
+                    expiry_date = ahpra_expiry_date
+            except (ValueError, TypeError):
+                raise serializers.ValidationError({
+                    'ahpra_expiry_date': 'Invalid AHPRA expiry date format. Use YYYY-MM-DD'
+                })
+            
+            # Check if AHPRA number already exists
+            if PsychologistProfile.objects.filter(ahpra_registration_number=ahpra_registration_number).exists():
+                raise serializers.ValidationError({
+                    'ahpra_registration_number': 'AHPRA registration number already exists'
+                })
+            
+            # Get optional fields with defaults
+            title = initial_data.get('title', 'Dr')
+            qualifications = initial_data.get('qualifications', '')
+            years_experience = initial_data.get('years_experience', 0)
+            consultation_fee = Decimal(str(initial_data.get('consultation_fee', 180.00)))
+            medicare_rebate_amount = Decimal(str(initial_data.get('medicare_rebate_amount', 87.45)))
+            medicare_provider_number = initial_data.get('medicare_provider_number', '')
+            bio = initial_data.get('bio', '')
+            is_accepting_new_patients = initial_data.get('is_accepting_new_patients', True)
+            
+            # Create psychologist profile
+            PsychologistProfile.objects.create(
+                user=user,
+                ahpra_registration_number=ahpra_registration_number,
+                ahpra_expiry_date=expiry_date,
+                title=title,
+                qualifications=qualifications,
+                years_experience=years_experience,
+                consultation_fee=consultation_fee,
+                medicare_rebate_amount=medicare_rebate_amount,
+                medicare_provider_number=medicare_provider_number,
+                bio=bio,
+                is_accepting_new_patients=is_accepting_new_patients
+            )
         
         # Send welcome email
         try:
