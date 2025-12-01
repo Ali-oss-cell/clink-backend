@@ -59,6 +59,25 @@ class User(AbstractUser):
         help_text="Email verification status - required for full system access"
     )
     
+    # Email verification
+    email_verification_token = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Token for email verification"
+    )
+    email_verification_token_expires = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Expiration time for email verification token"
+    )
+    email_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when email was verified"
+    )
+    
     # Welcome email tracking
     welcome_email_sent = models.BooleanField(default=False, help_text="Whether welcome email was successfully sent")
     welcome_email_sent_at = models.DateTimeField(null=True, blank=True, help_text="When welcome email was sent")
@@ -175,6 +194,22 @@ class User(AbstractUser):
                 (today.month, today.day) < (self.date_of_birth.month, self.date_of_birth.day)
             )
         return None
+    
+    def generate_email_verification_token(self):
+        """
+        Generate a secure token for email verification
+        
+        Returns:
+            str: Verification token
+        """
+        import secrets
+        from datetime import timedelta
+        
+        token = secrets.token_urlsafe(32)  # 32 bytes = 44 characters
+        self.email_verification_token = token
+        self.email_verification_token_expires = timezone.now() + timedelta(days=7)  # 7 days expiry
+        self.save(update_fields=['email_verification_token', 'email_verification_token_expires'])
+        return token
     
     # Role checking methods for permission control
     def is_patient(self):

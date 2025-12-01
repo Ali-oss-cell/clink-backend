@@ -2206,6 +2206,144 @@ class ChangePasswordView(APIView):
         return Response({'message': 'Password changed successfully'})
 
 
+class VerifyEmailView(APIView):
+    """
+    Verify user email address using verification token
+    
+    POST /api/auth/verify-email/
+    Body: {"token": "verification_token_here"}
+    """
+    permission_classes = [AllowAny]  # Public endpoint - no authentication required
+    
+    def post(self, request):
+        """Verify email using token"""
+        token = request.data.get('token')
+        
+        if not token:
+            return Response(
+                {'error': 'Verification token is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(email_verification_token=token)
+            
+            # Check if token is expired
+            if user.email_verification_token_expires and user.email_verification_token_expires < timezone.now():
+                return Response(
+                    {
+                        'error': 'Verification token has expired. Please request a new verification email.',
+                        'expired': True
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if already verified
+            if user.is_verified:
+                return Response(
+                    {
+                        'message': 'Email is already verified',
+                        'is_verified': True
+                    },
+                    status=status.HTTP_200_OK
+                )
+            
+            # Verify the user
+            user.is_verified = True
+            user.email_verified_at = timezone.now()
+            user.email_verification_token = None  # Clear token
+            user.email_verification_token_expires = None
+            user.save()
+            
+            # Log the action
+            try:
+                log_action(
+                    user=user,
+                    action='email_verified',
+                    details=f'Email verified via token'
+                )
+            except Exception:
+                pass  # Don't fail if audit logging fails
+            
+            return Response(
+                {
+                    'message': 'Email verified successfully',
+                    'is_verified': True
+                },
+                status=status.HTTP_200_OK
+            )
+            
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'Invalid verification token'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class ResendVerificationEmailView(APIView):
+    """
+    Resend verification email to user
+    
+    POST /api/auth/resend-verification/
+    Body: {"email": "user@example.com"}
+    """
+    permission_classes = [AllowAny]  # Public endpoint
+    
+    def post(self, request):
+        """Resend verification email"""
+        email = request.data.get('email')
+        
+        if not email:
+            return Response(
+                {'error': 'Email is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(email=email)
+            
+            # If already verified, don't resend
+            if user.is_verified:
+                return Response(
+                    {'message': 'Email is already verified'},
+                    status=status.HTTP_200_OK
+                )
+            
+            # Generate new token if user doesn't have one or it's expired
+            if not user.email_verification_token or (
+                user.email_verification_token_expires and 
+                user.email_verification_token_expires < timezone.now()
+            ):
+                verification_token = user.generate_email_verification_token()
+            else:
+                verification_token = user.email_verification_token
+            
+            # Send verification email
+            from core.email_service import send_welcome_email
+            result = send_welcome_email(user)
+            
+            if result.get('success'):
+                return Response(
+                    {'message': 'Verification email sent successfully'},
+                    status=status.HTTP_200_OK
+                )
+            else:
+                return Response(
+                    {
+                        'error': 'Failed to send verification email',
+                        'details': result.get('error', 'Unknown error')
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+                
+        except User.DoesNotExist:
+            # Don't reveal if email exists or not (security best practice)
+            return Response(
+                {'message': 'If this email exists and is not verified, a verification link has been sent'},
+                status=status.HTTP_200_OK
+            )
+
+
 class PrivacyPolicyAcceptanceView(APIView):
     """
     Accept Privacy Policy (Privacy Act 1988 - APP 1 compliance)

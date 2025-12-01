@@ -1057,7 +1057,7 @@ Psychology Clinic Team
 
 def send_welcome_email(user):
     """
-    Send welcome email to newly registered user
+    Send welcome email to newly registered user with email verification link
     
     Args:
         user: User instance (newly created)
@@ -1071,10 +1071,53 @@ def send_welcome_email(user):
     user_name = user.get_full_name() or user.first_name or "there"
     role_display = user.get_role_display()
     
-    subject = f"Welcome to Tailored Psychology - Your Account is Ready!"
+    # Build verification link if user has a verification token (patients only)
+    verification_link = None
+    if user.email_verification_token and not user.is_verified:
+        frontend_url = getattr(settings, 'FRONTEND_URL', 'https://tailoredpsychology.com.au')
+        verification_link = f"{frontend_url}/verify-email?token={user.email_verification_token}"
     
-    # Customize message based on role
-    if user.role == User.UserRole.PATIENT:
+    # Customize subject and message based on role
+    if user.role == User.UserRole.PATIENT and verification_link:
+        subject = f"Welcome to Tailored Psychology - Please Verify Your Email"
+        message = f"""
+Hello {user_name},
+
+Welcome to Tailored Psychology! We're excited to have you as part of our community.
+
+IMPORTANT: Please verify your email address to activate your account.
+
+Click this link to verify your email:
+{verification_link}
+
+This link will expire in 7 days.
+
+Your Account Details:
+--------------------
+Email: {user.email}
+Role: {role_display}
+
+Getting Started (after verification):
+------------------------------------
+1. Complete your intake form - This helps us understand your needs better
+2. Browse available psychologists - Find the right match for you
+3. Book your first appointment - Schedule a session that works for you
+4. Access your dashboard - View appointments, progress notes, and resources
+
+Need Help?
+----------
+If you have any questions or need assistance, please don't hesitate to contact us.
+
+If the verification link doesn't work, you can request a new one from your account settings.
+
+We're here to support you on your journey to better mental health.
+
+Best regards,
+The Tailored Psychology Team
+"""
+    elif user.role == User.UserRole.PATIENT:
+        # Patient but already verified or no token (shouldn't happen, but fallback)
+        subject = f"Welcome to Tailored Psychology - Your Account is Ready!"
         message = f"""
 Hello {user_name},
 

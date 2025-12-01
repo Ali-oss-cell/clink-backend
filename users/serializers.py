@@ -428,10 +428,13 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         
+        # Generate email verification token
+        verification_token = user.generate_email_verification_token()
+        
         # Create patient profile
         PatientProfile.objects.create(user=user)
         
-        # Send welcome email
+        # Send welcome email with verification link
         try:
             from core.email_service import send_welcome_email
             from django.utils import timezone

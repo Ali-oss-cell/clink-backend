@@ -32,6 +32,10 @@ urlpatterns = [
     path('profile/', views.ProfileView.as_view(), name='user-profile'),
     path('change-password/', views.ChangePasswordView.as_view(), name='change-password'),
     
+    # Email verification
+    path('verify-email/', views.VerifyEmailView.as_view(), name='verify-email'),
+    path('resend-verification/', views.ResendVerificationEmailView.as_view(), name='resend-verification'),
+    
     # Privacy & Consent Compliance (Privacy Act 1988)
     path('privacy-policy/', views.PrivacyPolicyAcceptanceView.as_view(), name='privacy-policy'),
     path('telehealth-consent/', views.TelehealthConsentView.as_view(), name='telehealth-consent'),
